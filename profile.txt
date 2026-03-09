@@ -1,0 +1,56 @@
+PROFILE CONTEXT FOR AI EMAIL GENERATION
+
+Name: Razeen H
+Email: razeen.official23@gmail.com
+Phone (UAE): +971 50 769 7208
+Phone (India): +91 9345035514
+portfilio link : https://razeen-portfolio.vercel.app/
+
+Short Intro (default):
+I am a developer with 2+ years of experience building scalable web applications and SaaS dashboards using React.js, Node.js, and modern web technologies. I focus on performance, automation, and clean system design while delivering production-ready applications used by thousands of users.  ￼
+
+⸻
+
+ROLE-SPECIFIC CONTEXT
+
+Frontend Roles:
+• Strong experience in React.js, JavaScript (ES6+), HTML5, CSS3, Tailwind CSS, and responsive UI development.  ￼
+• Built production SaaS dashboards with reusable components and performance optimization strategies.  ￼
+• Experience with D3.js visualizations and API-driven interfaces for real-time data systems.  ￼
+
+Full Stack Roles:
+• Built RESTful APIs using Node.js and Express.js for billing, authentication, automation, and provisioning systems.  ￼
+• Integrated Stripe and Razorpay for real-time payment workflows and automation pipelines.  ￼
+• Automated VPS provisioning and internal workflows, reducing deployment time significantly.  ￼
+
+React Roles:
+• Specialized in component architecture, Hooks, Context API, and performance optimization workflows.  ￼
+• Built scalable dashboards and high-performance UI systems used in SaaS environments.  ￼
+
+⸻
+
+PROJECT HIGHLIGHTS (SHORT VERSION)
+
+Hostzop SaaS Platforms:
+Developed full-stack dashboards for client/reseller ecosystems with automation workflows and real-time analytics.  ￼
+
+SpotCard Platform:
+Built interactive frontend features for event and business digital platforms using React and modern UI tooling.  ￼
+
+Automation + DevOps Work:
+Built CI/CD pipelines, SSH deployment workflows, and cron-based automation scripts for production systems.  ￼
+
+⸻
+
+EMAIL STYLE INSTRUCTIONS FOR AI
+
+Tone: professional, confident, concise
+Avoid: generic phrases like “I am excited to apply”
+Always include:
+
+• company name mention
+• role mention
+• one relevant experience
+• short closing line
+
+Length target: 140–190 words

@@ -1,0 +1,48 @@
+2026-03-09 05:56:36,241 [INFO] Starting email sender: excel=inr_companies_test.xlsx region=INR dry_run=True ollama=http://localhost:11434
+2026-03-09 05:56:36,359 [INFO] Loaded 5 recipients from Excel.
+2026-03-09 05:56:36,428 [ERROR] Ollama request failed: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+Traceback (most recent call last):
+  File "/Users/razeen/Desktop/email-sender/send_emails.py", line 183, in generate_body
+    resp.raise_for_status()
+    ~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/razeen/Desktop/email-sender/venv/lib/python3.13/site-packages/requests/models.py", line 1026, in raise_for_status
+    raise HTTPError(http_error_msg, response=self)
+requests.exceptions.HTTPError: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+2026-03-09 05:56:36,431 [WARNING] Skipping makerrazeen2301@gmail.com: no body generated.
+2026-03-09 05:56:36,437 [ERROR] Ollama request failed: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+Traceback (most recent call last):
+  File "/Users/razeen/Desktop/email-sender/send_emails.py", line 183, in generate_body
+    resp.raise_for_status()
+    ~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/razeen/Desktop/email-sender/venv/lib/python3.13/site-packages/requests/models.py", line 1026, in raise_for_status
+    raise HTTPError(http_error_msg, response=self)
+requests.exceptions.HTTPError: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+2026-03-09 05:56:36,437 [WARNING] Skipping razeen.official23@gmail.com: no body generated.
+2026-03-09 05:56:36,440 [ERROR] Ollama request failed: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+Traceback (most recent call last):
+  File "/Users/razeen/Desktop/email-sender/send_emails.py", line 183, in generate_body
+    resp.raise_for_status()
+    ~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/razeen/Desktop/email-sender/venv/lib/python3.13/site-packages/requests/models.py", line 1026, in raise_for_status
+    raise HTTPError(http_error_msg, response=self)
+requests.exceptions.HTTPError: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+2026-03-09 05:56:36,442 [WARNING] Skipping riderrazeen2301@gmail.com: no body generated.
+2026-03-09 05:56:36,444 [ERROR] Ollama request failed: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+Traceback (most recent call last):
+  File "/Users/razeen/Desktop/email-sender/send_emails.py", line 183, in generate_body
+    resp.raise_for_status()
+    ~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/razeen/Desktop/email-sender/venv/lib/python3.13/site-packages/requests/models.py", line 1026, in raise_for_status
+    raise HTTPError(http_error_msg, response=self)
+requests.exceptions.HTTPError: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+2026-03-09 05:56:36,444 [WARNING] Skipping razeen@hellosocial.in: no body generated.
+2026-03-09 05:56:36,448 [ERROR] Ollama request failed: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+Traceback (most recent call last):
+  File "/Users/razeen/Desktop/email-sender/send_emails.py", line 183, in generate_body
+    resp.raise_for_status()
+    ~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/razeen/Desktop/email-sender/venv/lib/python3.13/site-packages/requests/models.py", line 1026, in raise_for_status
+    raise HTTPError(http_error_msg, response=self)
+requests.exceptions.HTTPError: 404 Client Error: Not Found for url: http://localhost:11434/api/generate
+2026-03-09 05:56:36,448 [WARNING] Skipping razeen@hostzop.in: no body generated.
+2026-03-09 05:56:36,448 [INFO] Done. Processed 5 rows.
