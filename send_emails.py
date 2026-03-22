@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
 AI Email Sender: Read Excel (INR/UAE), pick resume by role, generate body via Ollama, send via SMTP.
+
+Resume location is driven by the Excel file:
+- inr_companies_test.xlsx (or path containing "inr") → resumes from resumes/INR (folder + PDF chosen by role)
+- uae_companies_test.xlsx (or path containing "uae") → resumes from resumes/UAE (folder + PDF chosen by role)
+
 Usage: python send_emails.py inr_companies_test.xlsx [--region inr|uae] [--dry-run]
 """
 
@@ -76,17 +81,32 @@ def get_config():
 
 
 def infer_region(excel_path: str, region_arg: str | None) -> str:
+    """Infer region from --region or Excel location/name.
+
+    Priority:
+    1) Folder-based: .../INR_Excel/<file>.xlsx -> INR, .../UAE_Excel/<file>.xlsx -> UAE
+    2) Filename-based fallback: name containing "inr" or "uae"
+    """
     if region_arg:
         r = region_arg.strip().upper()
         if r in ("INR", "UAE"):
             return r
         sys.exit(f"Invalid --region: use 'inr' or 'uae'")
-    path_lower = excel_path.lower()
+    p = Path(excel_path)
+    parts_lower = [part.lower() for part in p.parts]
+    if "inr_excel" in parts_lower:
+        return "INR"
+    if "uae_excel" in parts_lower:
+        return "UAE"
+
+    path_lower = p.name.lower()
     if "inr" in path_lower:
         return "INR"
     if "uae" in path_lower:
         return "UAE"
-    sys.exit("Could not infer region from Excel path. Use --region inr or --region uae.")
+    sys.exit(
+        "Could not infer region from Excel path. Put the Excel in INR_Excel/ or UAE_Excel/, or use --region inr|uae."
+    )
 
 
 def setup_logging(dry_run: bool) -> logging.Logger:
@@ -157,19 +177,58 @@ def role_to_folder(role: str, region: str) -> str:
 
 
 def get_resume_path(resumes_base: str, region: str, role: str, logger: logging.Logger) -> str | None:
+    """Pick resume from resumes/INR or resumes/UAE (by Excel). Within that, choose folder and PDF by role. Do not use generated/."""
     folder_name = role_to_folder(role, region)
     dir_path = Path(resumes_base) / region / folder_name
+    # If role-specific folder is missing/empty, fall back to default full-stack PDF per region.
     if not dir_path.is_dir():
-        logger.error("Resume directory not found: %s", dir_path)
+        default_resume = (
+            Path(resumes_base) / "INR" / "full-stack-inr" / "Full-stack-developer-CV-Razeen.pdf"
+            if region == "INR"
+            else Path(resumes_base) / "UAE" / "full-stack-uae" / "Full-stack-developer-CV-Razeen.pdf"
+        )
+        if default_resume.is_file():
+            logger.warning("Resume directory not found: %s. Falling back to %s", dir_path, default_resume)
+            return str(default_resume)
+        logger.error("Resume directory not found: %s (and default resume missing at %s)", dir_path, default_resume)
         return None
     pdfs = sorted(
         [f for f in dir_path.iterdir() if f.suffix.lower() == ".pdf" and ".." not in f.name],
         key=lambda p: p.name,
     )
     if not pdfs:
-        logger.error("No PDF found in %s", dir_path)
+        default_resume = (
+            Path(resumes_base) / "INR" / "full-stack-inr" / "Full-stack-developer-CV-Razeen.pdf"
+            if region == "INR"
+            else Path(resumes_base) / "UAE" / "full-stack-uae" / "Full-stack-developer-CV-Razeen.pdf"
+        )
+        if default_resume.is_file():
+            logger.warning("No PDF found in %s. Falling back to %s", dir_path, default_resume)
+            return str(default_resume)
+        logger.error("No PDF found in %s (and default resume missing at %s)", dir_path, default_resume)
         return None
     return str(pdfs[0])
+
+
+def _normalize_cell(val) -> str:
+    """Treat empty and pandas 'nan' string as empty; return stripped string."""
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return ""
+    s = str(val).strip()
+    return "" if s.lower() == "nan" or not s else s
+
+
+def get_subject(company: str, role: str) -> str:
+    """Return email subject from company and role (cold email / anonymous company handled)."""
+    has_role = _normalize_cell(role)
+    has_company = _normalize_cell(company)
+    if not has_role and not has_company:
+        return "Reaching out"
+    if not has_role:
+        return f"Reaching out – {company}"
+    if not has_company:
+        return f"Application for {role}"
+    return f"Application for {role} at {company}"
 
 
 def load_profile(config: dict, logger: logging.Logger) -> str | None:
@@ -189,43 +248,93 @@ def load_profile(config: dict, logger: logging.Logger) -> str | None:
         return None
 
 
-def parse_signature_from_profile(profile_text: str | None) -> dict:
-    """Extract name, email, phone, portfolio from profile text for the email signature block."""
-    sig = {"name": "", "email": "", "phone": "", "portfolio": ""}
-    if not profile_text:
-        return sig
-    for line in profile_text.splitlines():
-        line = line.strip()
-        if not line:
+# Region-based fixed signature blocks for all sent emails (do not include in generated body)
+DEFAULT_SIGNATURE_UAE = """Best regards,
+
+Razeen H
+razeen.official23@gmail.com
++971 50 769 7208
+https://razeen-portfolio.vercel.app"""
+
+DEFAULT_SIGNATURE_INR = """Best regards,
+
+Razeen H
+razeen.official23@gmail.com
++91 93450 35514
+https://razeen-portfolio.vercel.app"""
+
+
+def get_signature_block(region: str) -> str:
+    """Return the signature block to append based on region (UAE vs INR)."""
+    return DEFAULT_SIGNATURE_UAE if (region or "").strip().upper() == "UAE" else DEFAULT_SIGNATURE_INR
+
+
+# Trailing lines to strip from generated body so we only have one sign-off (our block)
+_SIGN_OFF_PATTERNS = (
+    "signature",
+    "best regards",
+    "sincerely",
+    "kind regards",
+    "thanks",
+    "thank you",
+    "regards",
+)
+
+
+def _is_sign_off_line(line: str) -> bool:
+    s = line.strip().lower().rstrip(".,:")
+    if not s:
+        return True
+    if s in _SIGN_OFF_PATTERNS:
+        return True
+    if s.startswith("signature") or s == "sign off":
+        return True
+    return False
+
+
+def strip_trailing_sign_off(body: str) -> str:
+    """Remove trailing 'Signature', 'Best regards', etc. so only our appended signature block remains."""
+    if not (body or "").strip():
+        return body or ""
+    lines = body.rstrip().split("\n")
+    while lines and _is_sign_off_line(lines[-1]):
+        lines.pop()
+    return "\n".join(lines).rstrip()
+
+
+_EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.I)
+_URL_RE = re.compile(r"https?://\S+", re.I)
+_PHONE_RE = re.compile(r"(\+\d[\d\s-]{6,}\d)")
+
+
+def strip_trailing_contact_block(body: str) -> str:
+    """Remove trailing contact details (name/email/phone/portfolio) that the model may output."""
+    if not (body or "").strip():
+        return body or ""
+    lines = body.rstrip().split("\n")
+    while lines:
+        last_raw = lines[-1]
+        last = last_raw.strip()
+        if not last:
+            lines.pop()
             continue
-        lower = line.lower()
-        if lower.startswith("name:"):
-            sig["name"] = line.split(":", 1)[1].strip()
-        elif lower.startswith("email:"):
-            sig["email"] = line.split(":", 1)[1].strip()
-        elif lower.startswith("phone") and ":" in line:
-            # e.g. "Phone (UAE): +971 ..." or "Phone: ..."
-            sig["phone"] = line.split(":", 1)[1].strip()
-        elif "portfolio" in lower or "portfilio" in lower:
-            if ":" in line:
-                sig["portfolio"] = line.split(":", 1)[1].strip()
-    return sig
+        last_lower = last.lower()
 
+        is_contact = False
+        if last_lower in {"razeen h"}:
+            is_contact = True
+        if _EMAIL_RE.search(last):
+            is_contact = True
+        if _PHONE_RE.search(last):
+            is_contact = True
+        if _URL_RE.search(last) and ("portfolio" in last_lower or "vercel.app" in last_lower):
+            is_contact = True
 
-def format_signature(sig: dict) -> str:
-    """Format signature block: name, then email, phone, portfolio (each on its own line)."""
-    parts = []
-    if sig.get("name"):
-        parts.append(sig["name"])
-    if sig.get("email"):
-        parts.append(sig["email"])
-    if sig.get("phone"):
-        parts.append(sig["phone"])
-    if sig.get("portfolio"):
-        parts.append(sig["portfolio"])
-    if not parts:
-        return ""
-    return "Best regards,\n\n" + "\n".join(parts)
+        if is_contact:
+            lines.pop()
+            continue
+        break
+    return "\n".join(lines).rstrip()
 
 
 def generate_body(
@@ -238,27 +347,39 @@ def generate_body(
     logger: logging.Logger,
 ) -> str | None:
     url = f"{config['ollama_base_url']}/api/generate"
-    is_cold_email = not (role or "").strip()
-    is_anonymous_company = not (company or "").strip()
+    role_clean = _normalize_cell(role)
+    company_clean = _normalize_cell(company)
+    is_cold_email = not role_clean
+    is_anonymous_company = not company_clean
     has_jd = bool((job_description or "").strip())
 
-    # Opening and company/role mention
+    # Email structure: greeting → about me + role (if any) → achievements/exp → how I add value. Signature is added automatically.
+    structure = """Follow this structure in order:
+1. Greeting
+2. About me and the role I am applying for (if a role is mentioned; otherwise about me and my interest)
+3. About my achievements and experience
+4. How I can add value in their company
+Do not add any contact details (no name/email/phone/portfolio/links) and do not add "Signature", "Best regards", "Sincerely", or any sign-off—only the main email content. A full signature block is added automatically; do not duplicate it."""
     if is_anonymous_company:
-        prompt = """Write a short, professional job application email body (2-4 sentences only).
-- Addressed to the hiring team. Do not use or guess the company name; keep it anonymous. Refer to "your company", "your team", or "the company" (e.g. "your company's work", "the company's mission") so it feels personal without naming the company."""
+        prompt = f"""Write a short, professional job application email body.
+- Addressed to the hiring team. Do not use or guess the company name; keep it anonymous. Refer to "your company", "your team", or "the company" (e.g. "your company's work", "the company's mission") so it feels personal without naming the company.
+{structure}"""
     else:
-        prompt = f"""Write a short, professional job application email body (2-4 sentences only).
-- Addressed to the hiring team at {company}."""
+        prompt = f"""Write a short, professional job application email body.
+- Addressed to the hiring team at {company_clean}.
+{structure}"""
     if is_cold_email:
         prompt += """
-- This is a cold email (no specific role in the listing). Write as someone exploring opportunities, interested in the company, and open to relevant roles. Do not mention a specific job title.
-- Professional tone, not robotic. No subject line. End with a sign-off like "Best regards". Do not include placeholders like [Your Name]. Keep it concise."""
+- This is a cold email (no specific role in the listing). Write as a developer with 2+ years of experience looking for an opportunity in development roles. Do not mention a specific job title. Never use the word "nan" or any placeholder for a role.
+- Professional tone, not robotic. No subject line. Keep it concise."""
     else:
         prompt += f"""
-- Mention the company name and the role "{role}" naturally.
-- Professional tone, not robotic. No subject line. End with a sign-off like "Best regards". Do not include placeholders like [Your Name]. Keep it concise."""
-    if name and str(name).strip():
+- Mention the company name and the role "{role_clean}" naturally.
+- Professional tone, not robotic. No subject line. Keep it concise."""
+    if name:
         prompt += f"\n- You may reference that you were referred by {name} if it fits naturally."
+    else:
+        prompt += "\n- Do not mention being referred by anyone; do not add any referral phrase (e.g. no 'I was referred to you by...')."
 
     # Job description: tailor email to JD but only use matching content—never lie
     if has_jd:
@@ -276,14 +397,14 @@ CRITICAL: Write the email based only on what in the candidate profile actually m
             else (
                 f'Use the job description above: mention only 1–2 items from the candidate profile that actually match the JD. Do not list everything; do not claim non-matching skills.'
                 if has_jd
-                else f'Based on the role "{role}", choose what to include: only 1–2 items that match (e.g. one relevant work experience OR one relevant project; for frontend highlight frontend work, for full-stack highlight full-stack, etc.). Do not list everything.'
+                else f'Based on the role "{role_clean}", choose what to include: only 1–2 items that match (e.g. one relevant work experience OR one relevant project; for frontend highlight frontend work, for full-stack highlight full-stack, etc.). Do not list everything.'
             )
         )
         prompt += f"""
 
 Use this candidate profile to personalize the email. {role_instruction}
-- Do not add the candidate's name, email, phone or portfolio in the body—a signature block will be added automatically after your text.
-Keep the email 2–4 sentences total.
+- Do not add "Signature", "Best regards", or any sign-off in the body—a full signature block is added automatically.
+- Keep the email concise (roughly 2–4 short paragraphs matching the structure above).
 
 Candidate profile:
 {profile_text}"""
@@ -310,18 +431,7 @@ def build_and_send(
     logger: logging.Logger,
 ) -> bool:
     msg = EmailMessage()
-    # Subject: cold email (no role) and/or anonymous company (no name)
-    has_role = (role or "").strip()
-    has_company = (company or "").strip()
-    if not has_role and not has_company:
-        subject = "Reaching out"
-    elif not has_role:
-        subject = f"Reaching out – {company}"
-    elif not has_company:
-        subject = f"Application for {role}"
-    else:
-        subject = f"Application for {role} at {company}"
-    msg["Subject"] = subject
+    msg["Subject"] = get_subject(company, role)
     msg["From"] = config["from_email"]
     msg["To"] = to_email
     msg.set_content(body)
@@ -380,18 +490,19 @@ def main() -> None:
         logger.info("Loaded profile from %s.", config["profile_file"])
 
     for i, row in enumerate(rows):
-        company = str(row.get("Company", "")).strip()
-        role = str(row.get("Role", "")).strip()
+        company = _normalize_cell(row.get("Company", ""))
+        role = _normalize_cell(row.get("Role", ""))
         to_email = str(row.get("Email", "")).strip()
-        name = row.get("Name")
-        if name is not None:
-            name = str(name).strip()
-        else:
-            name = ""
+        name = _normalize_cell(row.get("Name", ""))  # referral name; empty/nan = do not mention referral
         job_description = row.get("Job Description")
-        job_description = (job_description if job_description is not None else "").strip() or None
+        if job_description is None or pd.isna(job_description):
+            job_description = None
+        else:
+            job_description = str(job_description).strip() or None
 
-        resume_path = get_resume_path(config["resumes_base"], region, role, logger)
+        resume_path = get_resume_path(
+            config["resumes_base"], region, role, logger
+        )
         if not resume_path:
             continue
 
@@ -400,12 +511,13 @@ def main() -> None:
             logger.warning("Skipping %s: no body generated.", to_email)
             continue
 
-        # Append signature (name, email, phone, portfolio) at the bottom
-        if profile_text:
-            sig = parse_signature_from_profile(profile_text)
-            signature_block = format_signature(sig)
-            if signature_block:
-                body = body + "\n\n" + signature_block
+        # Clean any model-added sign-off/contact details (order matters):
+        # 1) Strip obvious sign-off lines at the end
+        # 2) Strip trailing contact blocks (name/email/phone/portfolio)
+        # 3) Strip sign-off again (in case contact stripping exposed it)
+        body = strip_trailing_sign_off(strip_trailing_contact_block(strip_trailing_sign_off(body)))
+        # Append fixed signature block at the bottom (region-based phone); only one sign-off.
+        body = body + "\n\n" + get_signature_block(region)
 
         success = build_and_send(to_email, company, role, body, resume_path, config, args.dry_run, logger)
         if not success:

@@ -1,0 +1,13 @@
+2026-03-09 13:12:49,473 [INFO] Starting email sender: excel=uae_companies_test.xlsx region=UAE dry_run=False ollama=http://localhost:11434
+2026-03-09 13:12:49,613 [INFO] Loaded 5 recipients from Excel.
+2026-03-09 13:12:49,613 [INFO] Loaded profile from profile.txt.
+2026-03-09 13:13:20,232 [INFO] Sent to makerrazeen2301@gmail.com (Company: Careem, Role: Frontend Developer)
+2026-03-09 13:13:20,235 [INFO] Waiting 10 seconds before next email...
+2026-03-09 13:13:55,443 [INFO] Sent to razeen.official23@gmail.com (Company: Noon, Role: Full Stack Developer)
+2026-03-09 13:13:55,450 [INFO] Waiting 10 seconds before next email...
+2026-03-09 13:14:28,748 [INFO] Sent to riderrazeen2301@gmail.com (Company: Etisalat, Role: Software Engineer)
+2026-03-09 13:14:28,751 [INFO] Waiting 10 seconds before next email...
+2026-03-09 13:14:54,555 [INFO] Sent to razeen@hellosocial.in (Company: Talabat, Role: React Developer)
+2026-03-09 13:14:54,559 [INFO] Waiting 10 seconds before next email...
+2026-03-09 13:15:24,979 [INFO] Sent to razeen@hostzop.in (Company: Du, Role: UI Developer)
+2026-03-09 13:15:24,981 [INFO] Done. Processed 5 rows.

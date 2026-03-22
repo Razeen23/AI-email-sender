@@ -1,0 +1,555 @@
+#!/usr/bin/env python3
+"""
+AI Email Sender (v2): Read INR job listings Excel (job_listings_last24hours.xlsx),
+pick resume by role, generate body via Ollama, send via SMTP.
+
+This variant supports the job-listings schema (columns like Company Name, HR Email,
+Key Skills, Why Match, Job Description).
+
+Usage:
+  python send_emails2.py INR_Excel/job_listings_last24hours.xlsx [--region inr|uae] [--dry-run]
+"""
+
+import argparse
+import logging
+import os
+import re
+import smtplib
+import sys
+import time
+from email.message import EmailMessage
+from pathlib import Path
+
+import pandas as pd
+import requests
+
+
+# --- .env loading (no external lib) ---
+def load_dotenv(path: str = ".env") -> None:
+    if not os.path.isfile(path):
+        return
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key:
+                    os.environ.setdefault(key, value)
+
+
+# --- Config ---
+REQUIRED_ENV = ("SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "FROM_EMAIL")
+OPTIONAL_ENV = {
+    "RESUMES_BASE": "resumes",
+    "PROFILE_FILE": "profile.txt",
+    "OLLAMA_BASE_URL": "http://localhost:11434",
+    "OLLAMA_MODEL": "llama3.2",
+}
+DELAY_SECONDS = 10
+BODY_MAX_CHARS = 2000
+
+# Role (normalized) -> folder name (suffix without region)
+ROLE_TO_FOLDER = [
+    (re.compile(r"frontend|front\s*end", re.I), "front-end"),
+    (re.compile(r"full\s*stack|fullstack", re.I), "full-stack"),
+    (re.compile(r"react\s*js|react", re.I), "react-js"),
+    (re.compile(r"gen\s*ai|generative\s*ai|\bai\b", re.I), "gen-ai"),  # UAE only
+]
+DEFAULT_FOLDER = "full-stack"
+
+
+def get_config():
+    load_dotenv()
+    missing = [k for k in REQUIRED_ENV if not os.environ.get(k)]
+    if missing:
+        sys.exit(f"Missing required env vars: {', '.join(missing)}. Set them or add to .env")
+    config = {
+        "smtp_host": os.environ["SMTP_HOST"],
+        "smtp_port": int(os.environ.get("SMTP_PORT", "587")),
+        "smtp_user": os.environ["SMTP_USER"],
+        "smtp_password": os.environ["SMTP_PASSWORD"],
+        "from_email": os.environ["FROM_EMAIL"],
+        "resumes_base": os.environ.get("RESUMES_BASE", OPTIONAL_ENV["RESUMES_BASE"]),
+        "profile_file": os.environ.get("PROFILE_FILE", OPTIONAL_ENV["PROFILE_FILE"]),
+        "ollama_base_url": os.environ.get("OLLAMA_BASE_URL", OPTIONAL_ENV["OLLAMA_BASE_URL"]).rstrip("/"),
+        "ollama_model": os.environ.get("OLLAMA_MODEL", OPTIONAL_ENV["OLLAMA_MODEL"]),
+    }
+    return config
+
+
+def infer_region(excel_path: str, region_arg: str | None) -> str:
+    """Infer region from --region or Excel location/name.
+
+    Priority:
+    1) Folder-based: .../INR_Excel/<file>.xlsx -> INR, .../UAE_Excel/<file>.xlsx -> UAE
+    2) Filename-based fallback: name containing "inr" or "uae"
+    """
+    if region_arg:
+        r = region_arg.strip().upper()
+        if r in ("INR", "UAE"):
+            return r
+        sys.exit("Invalid --region: use 'inr' or 'uae'")
+    p = Path(excel_path)
+    parts_lower = [part.lower() for part in p.parts]
+    if "inr_excel" in parts_lower:
+        return "INR"
+    if "uae_excel" in parts_lower:
+        return "UAE"
+
+    path_lower = p.name.lower()
+    if "inr" in path_lower:
+        return "INR"
+    if "uae" in path_lower:
+        return "UAE"
+    sys.exit(
+        "Could not infer region from Excel path. Put the Excel in INR_Excel/ or UAE_Excel/, or use --region inr|uae."
+    )
+
+
+def setup_logging(dry_run: bool) -> logging.Logger:
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    run_type = "dryrun" if dry_run else "run"
+    log_file = log_dir / f"email_sender2_{run_type}_{timestamp}.log"
+    logger = logging.getLogger("email_sender2")
+    logger.setLevel(logging.DEBUG)
+    logger.handlers.clear()
+    fh = logging.FileHandler(log_file, encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    fh.setFormatter(fmt)
+    ch.setFormatter(fmt)
+    logger.addHandler(fh)
+    logger.addHandler(ch)
+    return logger
+
+
+def _canon(s: str) -> str:
+    return re.sub(r"[\s_]+", " ", str(s).strip().lower())
+
+
+def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize multiple possible header spellings to internal names.
+
+    Required internal columns: Company, Role, Email
+    Optional: Job Description, Key Skills, Why Match
+    """
+    col_map: dict[object, str] = {}
+    for c in df.columns:
+        key = _canon(c)
+        if "company" in key and "name" in key:
+            col_map[c] = "Company"
+        elif key == "company":
+            col_map[c] = "Company"
+        elif key == "role":
+            col_map[c] = "Role"
+        elif ("hr" in key and "email" in key) or key == "email":
+            col_map[c] = "Email"
+        elif "job description" in key or key in {"jd", "jobdesc", "job desc"}:
+            col_map[c] = "Job Description"
+        elif key in {"key skills", "skills", "keyskill", "keyskill(s)"} or ("key" in key and "skills" in key):
+            col_map[c] = "Key Skills"
+        elif key in {"why match", "match reason", "reason"} or ("why" in key and "match" in key):
+            col_map[c] = "Why Match"
+        elif "referal" in key or "referral" in key:
+            # not in the new schema, but keep compatibility
+            col_map[c] = "Name"
+    return df.rename(columns=col_map)
+
+
+def load_excel(excel_path: str, logger: logging.Logger) -> pd.DataFrame:
+    if not os.path.isfile(excel_path):
+        sys.exit(f"Excel file not found: {excel_path}")
+    df = pd.read_excel(excel_path, engine="openpyxl")
+    df = normalize_columns(df)
+    required = {"Company", "Role", "Email"}
+    missing = required - set(df.columns)
+    if missing:
+        sys.exit(
+            f"Excel missing columns (after mapping): {missing}. Expected Company Name, Role, HR Email."
+        )
+    before = len(df)
+    df = df.dropna(subset=["Email"])
+    df = df[df["Email"].astype(str).str.contains("@", na=False)]
+    dropped = before - len(df)
+    if dropped:
+        logger.warning("Dropped %d rows with missing or invalid Email.", dropped)
+    return df
+
+
+def role_to_folder(role: str, region: str) -> str:
+    r = (role or "").strip().lower()
+    for pattern, folder in ROLE_TO_FOLDER:
+        if pattern.search(r):
+            if folder == "gen-ai" and region != "UAE":
+                continue
+            return f"{folder}-{region.lower()}"
+    return f"{DEFAULT_FOLDER}-{region.lower()}"
+
+
+def get_resume_path(resumes_base: str, region: str, role: str, logger: logging.Logger) -> str | None:
+    """Pick resume from resumes/INR or resumes/UAE (by Excel). Within that, choose folder and PDF by role. Do not use generated/."""
+    folder_name = role_to_folder(role, region)
+    dir_path = Path(resumes_base) / region / folder_name
+    if not dir_path.is_dir():
+        default_resume = (
+            Path(resumes_base) / "INR" / "full-stack-inr" / "Full-stack-developer-CV-Razeen.pdf"
+            if region == "INR"
+            else Path(resumes_base) / "UAE" / "full-stack-uae" / "Full-stack-developer-CV-Razeen.pdf"
+        )
+        if default_resume.is_file():
+            logger.warning("Resume directory not found: %s. Falling back to %s", dir_path, default_resume)
+            return str(default_resume)
+        logger.error("Resume directory not found: %s (and default resume missing at %s)", dir_path, default_resume)
+        return None
+    pdfs = sorted(
+        [f for f in dir_path.iterdir() if f.suffix.lower() == ".pdf" and ".." not in f.name],
+        key=lambda p: p.name,
+    )
+    if not pdfs:
+        default_resume = (
+            Path(resumes_base) / "INR" / "full-stack-inr" / "Full-stack-developer-CV-Razeen.pdf"
+            if region == "INR"
+            else Path(resumes_base) / "UAE" / "full-stack-uae" / "Full-stack-developer-CV-Razeen.pdf"
+        )
+        if default_resume.is_file():
+            logger.warning("No PDF found in %s. Falling back to %s", dir_path, default_resume)
+            return str(default_resume)
+        logger.error("No PDF found in %s (and default resume missing at %s)", dir_path, default_resume)
+        return None
+    return str(pdfs[0])
+
+
+def _normalize_cell(val) -> str:
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return ""
+    s = str(val).strip()
+    return "" if s.lower() == "nan" or not s else s
+
+
+def get_subject(company: str, role: str) -> str:
+    has_role = _normalize_cell(role)
+    has_company = _normalize_cell(company)
+    if not has_role and not has_company:
+        return "Reaching out"
+    if not has_role:
+        return f"Reaching out – {company}"
+    if not has_company:
+        return f"Application for {role}"
+    return f"Application for {role} at {company}"
+
+
+def load_profile(config: dict, logger: logging.Logger) -> str | None:
+    path = Path(config["profile_file"])
+    if not path.is_file():
+        logger.debug("No profile file at %s; emails will not include your personal info.", path)
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read().strip()
+        lines = [l for l in text.splitlines() if l.strip() and not l.strip().startswith("#")]
+        return "\n".join(lines).strip() or None
+    except OSError as e:
+        logger.warning("Could not read profile file %s: %s", path, e)
+        return None
+
+
+DEFAULT_SIGNATURE_UAE = """Best regards,
+
+Razeen H
+razeen.official23@gmail.com
++971 50 769 7208
+https://razeen-portfolio.vercel.app"""
+
+DEFAULT_SIGNATURE_INR = """Best regards,
+
+Razeen H
+razeen.official23@gmail.com
++91 93450 35514
+https://razeen-portfolio.vercel.app"""
+
+
+def get_signature_block(region: str) -> str:
+    return DEFAULT_SIGNATURE_UAE if (region or "").strip().upper() == "UAE" else DEFAULT_SIGNATURE_INR
+
+
+_SIGN_OFF_PATTERNS = (
+    "signature",
+    "best regards",
+    "sincerely",
+    "kind regards",
+    "thanks",
+    "thank you",
+    "regards",
+)
+
+
+def _is_sign_off_line(line: str) -> bool:
+    s = line.strip().lower().rstrip(".,:")
+    if not s:
+        return True
+    if s in _SIGN_OFF_PATTERNS:
+        return True
+    if s.startswith("signature") or s == "sign off":
+        return True
+    return False
+
+
+def strip_trailing_sign_off(body: str) -> str:
+    if not (body or "").strip():
+        return body or ""
+    lines = body.rstrip().split("\n")
+    while lines and _is_sign_off_line(lines[-1]):
+        lines.pop()
+    return "\n".join(lines).rstrip()
+
+
+_EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.I)
+_URL_RE = re.compile(r"https?://\S+", re.I)
+_PHONE_RE = re.compile(r"(\+\d[\d\s-]{6,}\d)")
+
+
+def strip_trailing_contact_block(body: str) -> str:
+    if not (body or "").strip():
+        return body or ""
+    lines = body.rstrip().split("\n")
+    while lines:
+        last_raw = lines[-1]
+        last = last_raw.strip()
+        if not last:
+            lines.pop()
+            continue
+        last_lower = last.lower()
+
+        is_contact = False
+        if last_lower in {"razeen h"}:
+            is_contact = True
+        if _EMAIL_RE.search(last):
+            is_contact = True
+        if _PHONE_RE.search(last):
+            is_contact = True
+        if _URL_RE.search(last) and ("portfolio" in last_lower or "vercel.app" in last_lower):
+            is_contact = True
+
+        if is_contact:
+            lines.pop()
+            continue
+        break
+    return "\n".join(lines).rstrip()
+
+
+def generate_body(
+    company: str,
+    role: str,
+    job_description: str | None,
+    key_skills: str | None,
+    why_match: str | None,
+    profile_text: str | None,
+    config: dict,
+    logger: logging.Logger,
+) -> str | None:
+    url = f"{config['ollama_base_url']}/api/generate"
+    role_clean = _normalize_cell(role)
+    company_clean = _normalize_cell(company)
+    has_jd = bool((job_description or "").strip())
+    has_key_skills = bool((key_skills or "").strip())
+    has_why_match = bool((why_match or "").strip())
+
+    structure = """Follow this structure in order:
+1. Greeting
+2. About me and the role I am applying for
+3. About my achievements and experience (1–2 strongest, relevant points)
+4. How I can add value in their company
+Do not add any contact details (no name/email/phone/portfolio/links), do not include any URLs (including job links), and do not add "Signature", "Best regards", "Sincerely", or any sign-off—only the main email content. A full signature block is added automatically; do not duplicate it."""
+
+    if company_clean:
+        prompt = f"""Write a short, professional job application email body.
+- Addressed to the hiring team at {company_clean}.
+{structure}
+- Mention the company name and the role "{role_clean}" naturally.
+- Professional tone, not robotic. No subject line. Keep it concise."""
+    else:
+        prompt = f"""Write a short, professional job application email body.
+- Addressed to the hiring team. Do not use or guess the company name; keep it anonymous and use "your team" or "the company".
+{structure}
+- Mention the role "{role_clean}" naturally.
+- Professional tone, not robotic. No subject line. Keep it concise."""
+
+    if has_key_skills:
+        prompt += f"""
+
+Key skills from the listing (context, not guaranteed requirements):
+{key_skills.strip()[:1500]}"""
+
+    if has_why_match:
+        prompt += f"""
+
+Why this is a match (guidance for emphasis):
+{why_match.strip()[:1500]}"""
+
+    if has_jd:
+        prompt += f"""
+
+Job description for this role:
+{job_description.strip()[:3000]}
+
+CRITICAL: Write the email based only on what in the candidate profile actually matches this job description and the key skills above. Treat \"Why this is a match\" as optional guidance, not as proof of experience. Mention only skills, experience, or projects from the profile that align. If something is not in the profile, do not claim it or imply the candidate has it. Never lie."""
+    else:
+        prompt += """
+
+CRITICAL: If job description is missing, keep the email honest and broadly relevant to the role without inventing experience."""
+
+    if profile_text:
+        prompt += f"""
+
+Use this candidate profile to personalize the email:
+- Choose only 1–2 items from the candidate profile that match the role and the listing context above.
+- Do not list everything; do not claim non-matching skills.
+- Do not add any sign-off or contact details.
+
+Candidate profile:
+{profile_text}"""
+
+    payload = {"model": config["ollama_model"], "prompt": prompt, "stream": False}
+    try:
+        resp = requests.post(url, json=payload, timeout=120)
+        resp.raise_for_status()
+        data = resp.json()
+        body = (data.get("response") or "").strip()[:BODY_MAX_CHARS]
+        return body or None
+    except requests.RequestException as e:
+        logger.exception("Ollama request failed: %s", e)
+        return None
+
+
+def build_and_send(
+    to_email: str,
+    company: str,
+    role: str,
+    body: str,
+    resume_path: str,
+    config: dict,
+    dry_run: bool,
+    logger: logging.Logger,
+) -> bool:
+    msg = EmailMessage()
+    msg["Subject"] = get_subject(company, role)
+    msg["From"] = config["from_email"]
+    msg["To"] = to_email
+    msg.set_content(body)
+    with open(resume_path, "rb") as f:
+        msg.add_attachment(f.read(), maintype="application", subtype="pdf", filename=Path(resume_path).name)
+    if dry_run:
+        logger.info("[DRY-RUN] Would send to %s (Company: %s, Role: %s)", to_email, company, role)
+        return True
+    try:
+        if config["smtp_port"] == 465:
+            with smtplib.SMTP_SSL(config["smtp_host"], config["smtp_port"]) as smtp:
+                smtp.login(config["smtp_user"], config["smtp_password"])
+                smtp.send_message(msg)
+        else:
+            with smtplib.SMTP(config["smtp_host"], config["smtp_port"]) as smtp:
+                smtp.starttls()
+                smtp.login(config["smtp_user"], config["smtp_password"])
+                smtp.send_message(msg)
+        logger.info("Sent to %s (Company: %s, Role: %s)", to_email, company, role)
+        return True
+    except smtplib.SMTPException as e:
+        logger.exception("SMTP failed for %s: %s", to_email, e)
+        return False
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Send personalized job emails from job listings Excel using Ollama and SMTP."
+    )
+    parser.add_argument(
+        "excel_path",
+        help="Path to Excel file (e.g. INR_Excel/job_listings_last24hours.xlsx)",
+    )
+    parser.add_argument("--region", choices=["inr", "uae"], help="Force region (default: inferred from path/name)")
+    parser.add_argument("--dry-run", action="store_true", help="Generate and log only; do not send email")
+    args = parser.parse_args()
+
+    config = get_config()
+    region = infer_region(args.excel_path, args.region)
+    logger = setup_logging(args.dry_run)
+
+    logger.info(
+        "Starting email sender2: excel=%s region=%s dry_run=%s ollama=%s",
+        args.excel_path,
+        region,
+        args.dry_run,
+        config["ollama_base_url"],
+    )
+
+    resumes_base = Path(config["resumes_base"])
+    region_dir = resumes_base / region
+    if not region_dir.is_dir():
+        sys.exit(f"Resumes region directory not found: {region_dir}")
+
+    df = load_excel(args.excel_path, logger)
+    rows = list(df.to_dict("records"))
+    total = len(rows)
+    logger.info("Loaded %d recipients from Excel.", total)
+
+    profile_text = load_profile(config, logger)
+    if profile_text:
+        logger.info("Loaded profile from %s.", config["profile_file"])
+
+    for i, row in enumerate(rows):
+        company = _normalize_cell(row.get("Company", ""))
+        role = _normalize_cell(row.get("Role", ""))
+        to_email = str(row.get("Email", "")).strip()
+
+        job_description = row.get("Job Description")
+        if job_description is None or pd.isna(job_description):
+            job_description = None
+        else:
+            job_description = str(job_description).strip() or None
+
+        key_skills = row.get("Key Skills")
+        if key_skills is None or pd.isna(key_skills):
+            key_skills = None
+        else:
+            key_skills = str(key_skills).strip() or None
+
+        why_match = row.get("Why Match")
+        if why_match is None or pd.isna(why_match):
+            why_match = None
+        else:
+            why_match = str(why_match).strip() or None
+
+        resume_path = get_resume_path(config["resumes_base"], region, role, logger)
+        if not resume_path:
+            continue
+
+        body = generate_body(company, role, job_description, key_skills, why_match, profile_text, config, logger)
+        if not body:
+            logger.warning("Skipping %s: no body generated.", to_email)
+            continue
+
+        body = strip_trailing_sign_off(strip_trailing_contact_block(strip_trailing_sign_off(body)))
+        body = body + "\n\n" + get_signature_block(region)
+
+        success = build_and_send(to_email, company, role, body, resume_path, config, args.dry_run, logger)
+        if not success:
+            continue
+
+        if i < total - 1:
+            logger.info("Waiting %d seconds before next email...", DELAY_SECONDS)
+            time.sleep(DELAY_SECONDS)
+
+    logger.info("Done. Processed %d rows.", total)
+
+
+if __name__ == "__main__":
+    main()
+

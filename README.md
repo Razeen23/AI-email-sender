@@ -38,6 +38,12 @@ Python script that reads an Excel file (Indian or UAE companies), selects the ri
   python send_emails.py inr_companies_test.xlsx
   ```
 
+- **INR job listings (last 24 hours)** (uses `resumes/INR`, tailored using Job Description + Key Skills + Why Match):
+
+  ```bash
+  python send_emails2.py INR_Excel/job_listings_last24hours.xlsx --dry-run
+  ```
+
 - **UAE companies** (uses `resumes/UAE`, role-based PDF):
 
   ```bash
@@ -74,3 +80,56 @@ Role is matched (case-insensitive) to keywords: frontend, full stack, react, gen
 ## Logs
 
 Logs are written to `logs/email_sender_run_YYYYMMDD_HHMMSS.log` (or `email_sender_dryrun_...` for `--dry-run`). Console output is INFO level.
+
+---
+
+## Generate resume (generate_resume.py)
+
+Reads the same Excel file format as `send_emails.py`, loops over rows, and generates one tailored resume PDF per row (company + role + job description). **After each new PDF, sends one email with that PDF attached** using `send_generated_resume_email.py` (this flow does not use `send_emails.py`). Rows without a job description are skipped; rows whose PDF already exists are skipped. Output is saved under `resumes/{region}/generated/`.
+
+### Setup for generate_resume.py
+
+1. **Dependencies** — Same as above: `pip install -r requirements.txt` (pandas, openpyxl for Excel; markdown, weasyprint for Markdown → PDF). If WeasyPrint is not installed, only the Markdown file is saved (no PDF).
+2. **Ollama** — Must be running locally (e.g. `ollama serve`); same model as in `.env` (e.g. `OLLAMA_MODEL=llama3.2`).
+3. **Environment** — Same `.env` as the email sender. For **sending** emails after each generated PDF, set SMTP vars: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `FROM_EMAIL`. Optional: `RESUMES_BASE`, `PROFILE_FILE`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`.
+4. **Profile** — `profile.txt` (or `PROFILE_FILE`) must exist; resumes are generated only from this content.
+
+### Usage
+
+```bash
+python generate_resume.py inr_companies_test.xlsx --region inr
+```
+
+- **excel_path** — Path to Excel file. Required columns (same as send_emails): company name, role, HR email, job description. Rows without job description are skipped; rows without valid HR email skip sending but can still generate a PDF.
+- **--region** — `inr` or `uae`. Optional; if omitted, region is inferred from the filename (e.g. `inr` in `inr_companies_test.xlsx`).
+- **--dry-run** — Generate PDFs only; do not send emails (useful if SMTP is not set or you only want to build resumes).
+
+### Example run
+
+```text
+$ python generate_resume.py inr_companies_test.xlsx --region inr
+Loaded 5 rows from inr_companies_test.xlsx (region=INR).
+[1/5] Skipped Acme Corp / Frontend (no job description).
+[2/5] Generating resume for Zoho / Frontend Developer...
+[2/5] Saved PDF: resumes/INR/generated/zoho-frontend-developer.pdf
+Sent to hr@zoho.com (Company: Zoho, Role: Frontend Developer)
+Waiting 10 seconds before next email...
+[3/5] Skipped Beta Inc / Full Stack (PDF already exists).
+...
+Done. Generated: 2, sent: 2, skipped (no JD): 2, skipped (exists): 1, skipped (no email): 0, failed: 0.
+```
+
+With `--dry-run`: PDFs are created but no emails are sent; the summary shows `sent: 0`.
+
+Output paths:
+
+- `resumes/INR/generated/{company-slug}-{role-slug}.pdf` (and `.md`)
+- `resumes/UAE/generated/{company-slug}-{role-slug}.pdf` (and `.md`)
+
+Example: `resumes/INR/generated/zoho-frontend-developer.pdf`.
+
+The module `send_generated_resume_email.py` is used by `generate_resume.py` to send each email with the new PDF attached; it is standalone (does not use `send_emails.py`).
+
+### Using generated resumes in send_emails
+
+`send_emails.py` (CLI and Email preview API) prefers a company-specific generated PDF when it exists under `resumes/{region}/generated/{company-slug}-{role-slug}.pdf`, and otherwise uses the role-based folder (e.g. `full-stack-inr`). No extra configuration needed.
