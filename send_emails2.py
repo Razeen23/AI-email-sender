@@ -23,6 +23,16 @@ from pathlib import Path
 import pandas as pd
 import requests
 
+from email_sends_db import (
+    TABLE_SEND_EMAILS2,
+    duplicate_skip_reason,
+    has_recent_application,
+    init_db,
+    is_dedup_enabled,
+    is_logging_enabled,
+    log_email_send,
+)
+
 
 # --- .env loading (no external lib) ---
 def load_dotenv(path: str = ".env") -> None:
@@ -438,7 +448,7 @@ def build_and_send(
     config: dict,
     dry_run: bool,
     logger: logging.Logger,
-) -> bool:
+) -> tuple[bool, str | None]:
     msg = EmailMessage()
     msg["Subject"] = get_subject(company, role)
     msg["From"] = config["from_email"]
@@ -448,7 +458,7 @@ def build_and_send(
         msg.add_attachment(f.read(), maintype="application", subtype="pdf", filename=Path(resume_path).name)
     if dry_run:
         logger.info("[DRY-RUN] Would send to %s (Company: %s, Role: %s)", to_email, company, role)
-        return True
+        return True, None
     try:
         if config["smtp_port"] == 465:
             with smtplib.SMTP_SSL(config["smtp_host"], config["smtp_port"]) as smtp:
@@ -460,10 +470,10 @@ def build_and_send(
                 smtp.login(config["smtp_user"], config["smtp_password"])
                 smtp.send_message(msg)
         logger.info("Sent to %s (Company: %s, Role: %s)", to_email, company, role)
-        return True
+        return True, None
     except smtplib.SMTPException as e:
         logger.exception("SMTP failed for %s: %s", to_email, e)
-        return False
+        return False, str(e) or type(e).__name__
 
 
 def main() -> None:
@@ -481,6 +491,8 @@ def main() -> None:
     config = get_config()
     region = infer_region(args.excel_path, args.region)
     logger = setup_logging(args.dry_run)
+    if is_logging_enabled():
+        init_db()
 
     logger.info(
         "Starting email sender2: excel=%s region=%s dry_run=%s ollama=%s",
@@ -529,18 +541,84 @@ def main() -> None:
 
         resume_path = get_resume_path(config["resumes_base"], region, role, logger)
         if not resume_path:
+            log_email_send(
+                TABLE_SEND_EMAILS2,
+                recipient_email=to_email,
+                success=False,
+                dry_run=args.dry_run,
+                company=company or None,
+                role=role or None,
+                region=region,
+                subject=get_subject(company, role),
+                excel_path=args.excel_path,
+                failure_reason="no_resume",
+            )
+            continue
+
+        if is_dedup_enabled() and has_recent_application(to_email, company or None, role or None):
+            logger.info(
+                "Skipping %s (Company: %s, Role: %s): duplicate job/email within dedup window.",
+                to_email,
+                company,
+                role,
+            )
+            rp = Path(resume_path)
+            log_email_send(
+                TABLE_SEND_EMAILS2,
+                recipient_email=to_email,
+                success=False,
+                dry_run=args.dry_run,
+                company=company or None,
+                role=role or None,
+                region=region,
+                subject=get_subject(company, role),
+                pdf_path=str(rp.resolve()),
+                pdf_filename=rp.name,
+                excel_path=args.excel_path,
+                failure_reason=duplicate_skip_reason(),
+            )
             continue
 
         body = generate_body(company, role, job_description, key_skills, why_match, profile_text, config, logger)
         if not body:
             logger.warning("Skipping %s: no body generated.", to_email)
+            rp = Path(resume_path)
+            log_email_send(
+                TABLE_SEND_EMAILS2,
+                recipient_email=to_email,
+                success=False,
+                dry_run=args.dry_run,
+                company=company or None,
+                role=role or None,
+                region=region,
+                subject=get_subject(company, role),
+                pdf_path=str(rp.resolve()),
+                pdf_filename=rp.name,
+                excel_path=args.excel_path,
+                failure_reason="no_body",
+            )
             continue
 
         body = strip_trailing_sign_off(strip_trailing_contact_block(strip_trailing_sign_off(body)))
         body = body + "\n\n" + get_signature_block(region)
 
-        success = build_and_send(to_email, company, role, body, resume_path, config, args.dry_run, logger)
-        if not success:
+        ok, err = build_and_send(to_email, company, role, body, resume_path, config, args.dry_run, logger)
+        rp = Path(resume_path)
+        log_email_send(
+            TABLE_SEND_EMAILS2,
+            recipient_email=to_email,
+            success=ok,
+            dry_run=args.dry_run,
+            company=company or None,
+            role=role or None,
+            region=region,
+            subject=get_subject(company, role),
+            pdf_path=str(rp.resolve()),
+            pdf_filename=rp.name,
+            excel_path=args.excel_path,
+            failure_reason=err,
+        )
+        if not ok:
             continue
 
         if i < total - 1:

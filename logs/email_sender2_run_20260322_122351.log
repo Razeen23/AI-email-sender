@@ -1,0 +1,7 @@
+2026-03-22 12:23:51,204 [INFO] Starting email sender2: excel=INR_Excel/job_listings_last24hours.xlsx region=INR dry_run=False ollama=http://localhost:11434
+2026-03-22 12:23:51,321 [INFO] Loaded 3 recipients from Excel.
+2026-03-22 12:23:51,322 [INFO] Loaded profile from profile.txt.
+2026-03-22 12:23:51,323 [INFO] Skipping makerrazeen2301@gmail.com (Company: FLSmidth, Role: Senior Edge Developer): duplicate job/email within dedup window.
+2026-03-22 12:23:51,324 [INFO] Skipping makerrazeen2301@gmail.com (Company: CLARITY TTS, Role: Senior / Lead Full Stack Developer): duplicate job/email within dedup window.
+2026-03-22 12:23:51,324 [INFO] Skipping makerrazeen2301@gmail.com (Company: UPS, Role: Intermediate Application Developer – eCommerce): duplicate job/email within dedup window.
+2026-03-22 12:23:51,325 [INFO] Done. Processed 3 rows.

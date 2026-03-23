@@ -1,0 +1,54 @@
+2026-03-22 15:52:14,532 [INFO] Starting email sender2: excel=INR_Excel/job_listings_last24hours2.xlsx region=INR dry_run=False ollama=http://localhost:11434
+2026-03-22 15:52:14,657 [INFO] Loaded 50 recipients from Excel.
+2026-03-22 15:52:14,658 [INFO] Loaded profile from profile.txt.
+2026-03-22 15:52:14,660 [INFO] Skipping hr@whitemastery.com (Company: White Mastery Systems, Role: Full Stack Developer (Node.js / NestJS + React / Angular)): duplicate job/email within dedup window.
+2026-03-22 15:52:14,661 [INFO] Skipping hr@concertcareindia.com (Company: concertcare india pvt. ltd., Role: Frontend Developers): duplicate job/email within dedup window.
+2026-03-22 15:52:14,663 [INFO] Skipping careers@stitch.money (Company: Stitch, Role: React Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,664 [INFO] Skipping hr@expressinfra.in (Company: Express Infrastructure Pvt Ltd, Role: Full Stack Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,666 [INFO] Skipping jobs@vigilnz.com (Company: Vigilnz, Role: Product Experience Engineer (Frontend)): duplicate job/email within dedup window.
+2026-03-22 15:52:14,667 [INFO] Skipping recruitment@mindera.com (Company: MINDERA, Role: Senior Frontend Developer - React.JS): duplicate job/email within dedup window.
+2026-03-22 15:52:14,667 [INFO] Skipping india.recruiting@cgi.com (Company: CGI, Role: Frontend UI Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,668 [INFO] Skipping hr@vikgol.com (Company: Vikgol Technologies Private Limited, Role: Senior MERN Stack Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,669 [INFO] Skipping hr@qualwebs.com (Company: Qualwebs, Role: Full Stack Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,670 [INFO] Skipping careers@mokshaai.com (Company: Moksha AI and Media Technology, Role: Full Stack Developer - AI Focused): duplicate job/email within dedup window.
+2026-03-22 15:52:14,670 [INFO] Skipping careers@siemensgamesa.com (Company: Siemens Gamesa, Role: Frontend Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,671 [INFO] Skipping hr@insurepro.in (Company: Insure Pro 2.0, Role: Software Engineer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,672 [INFO] Skipping talent@nervesparks.com (Company: NERVESPARKS, Role: Associate Software Engineer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,672 [INFO] Skipping jobs@outposter.io (Company: Outposter, Role: Full Stack Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,673 [INFO] Skipping hr@horecastore.com (Company: HORECASTORE, Role: Frontend Engineer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,674 [INFO] Skipping hr@designdot.in (Company: DesignDot Technologies Pvt Ltd, Role: MERN Full Stack Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,674 [INFO] Skipping careers@wegile.com (Company: Wegile, Role: Full Stack Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,679 [INFO] Skipping hello@appcorelabs.com (Company: Appcore Labs, Role: Associate Frontend Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,680 [INFO] Skipping hr@ismanga.com (Company: Ismanga, Role: Full Stack Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,680 [INFO] Skipping talent@hiremountain.io (Company: Hire Mountain, Role: Web Developer (Frontend)): duplicate job/email within dedup window.
+2026-03-22 15:52:14,681 [INFO] Skipping jobs@filmax.in (Company: FILMAX, Role: Full Stack Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,682 [INFO] Skipping hr@ultimez.com (Company: ULTIMEZ TECHNOLOGY, Role: Senior Frontend Developer - Next.js, React.js): duplicate job/email within dedup window.
+2026-03-22 15:52:14,682 [INFO] Skipping hr@valtrans.ae (Company: VALTRANS Transportation Systems, Role: Full Stack Node.js Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,683 [INFO] Skipping careers@dashingwebdesign.com (Company: Dashing Web Design Design LLC, Role: Front-end ReactJs Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,684 [INFO] Skipping hr@betfoc.com (Company: BETFOC, Role: Frontend Developer (React/Next.js)): duplicate job/email within dedup window.
+2026-03-22 15:52:14,685 [INFO] Skipping jobs@affworld.io (Company: Affworld fz LLC, Role: Full Stack Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,685 [INFO] Skipping hire@devcentrehouse.com (Company: Dev Centre House, Role: Frontend Developer (ReactJS, React Native & Angular)): duplicate job/email within dedup window.
+2026-03-22 15:52:14,686 [INFO] Skipping careers@grandtech.ae (Company: Grand Technology, Role: Full Stack Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,691 [INFO] Skipping hr@precisecommunications.ae (Company: Precise Communications, Role: Front End Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,691 [INFO] Skipping careers@saqan.ae (Company: Saqan, Role: Full-Stack Developer (React/Next.js & Infrastructure)): duplicate job/email within dedup window.
+2026-03-22 15:52:14,692 [INFO] Skipping india.talent@syneoshealth.com (Company: Syneos Health, Role: Senior Engineer - Front End Web Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,693 [INFO] Skipping hr@bluphlux.com (Company: Bluphlux, Role: Sr. Frontend Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,693 [INFO] Skipping hr@kognitokube.com (Company: Kognito Kube Private Limited, Role: Frontend Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,694 [INFO] Skipping recruit.in@helios-kliniken.de (Company: Helios Kliniken GmbH, Role: Full Stack Developer (2–4 Years Experience)): duplicate job/email within dedup window.
+2026-03-22 15:52:14,694 [INFO] Skipping hr@valardigital.com (Company: Valardigital, Role: FULLSTACK DEVELOPER — MERN STACK): duplicate job/email within dedup window.
+2026-03-22 15:52:14,695 [INFO] Skipping hr@sinewave.co.in (Company: Sinewave Computer Services Pvt Ltd, Role: Full Stack Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,696 [INFO] Skipping talent@eduplex.in (Company: Eduplex services private limited, Role: React Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,696 [INFO] Skipping hr@aaxiscommerce.com (Company: AAXIS Commerce, Role: Senior Frontend Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,697 [INFO] Skipping engineering@zentrades.pro (Company: ZenTrades, Role: Frontend Software Engineer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,698 [INFO] Skipping jobs@bundled.in (Company: Bundled, Role: Senior Full Stack Engineer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,699 [INFO] Skipping talent@sia.in (Company: SIA, Role: Senior Frontend Engineer (Reactjs)): duplicate job/email within dedup window.
+2026-03-22 15:52:14,700 [INFO] Skipping talent@sia.in (Company: SIA, Role: Senior Full Stack Engineer (Frontend)): duplicate job/email within dedup window.
+2026-03-22 15:52:14,701 [INFO] Skipping careers@zycus.com (Company: Zycus Infotech, Role: Polyglot AI - Native Full Circle Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,701 [INFO] Skipping hr@jetwayfuel.com (Company: JETWAY OIL AND FUEL SERVICES, Role: Full Stack Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,702 [INFO] Skipping hr@fulcrumresources.in (Company: Fulcrum Resources pvt ltd, Role: Next.js Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,703 [INFO] Skipping careers@virallens.com (Company: Virallens, Role: Full Stack Engineer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,703 [INFO] Skipping hr@sulopasolutions.com (Company: Sulopa Solutions, Role: Python Full Stack Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,704 [INFO] Skipping india.careers@ringcentral.com (Company: RingCentral, Role: Frontend Developer): duplicate job/email within dedup window.
+2026-03-22 15:52:14,704 [INFO] Skipping hr@abstrabit.com (Company: Abstrabit Technologies, Role: Full Stack Engineer (0 to 2 Years)): duplicate job/email within dedup window.
+2026-03-22 15:52:14,705 [INFO] Skipping jobs@eteratech.com (Company: Etera Technologies FZCO, Role: Senior Full-Stack Developer (React/Node)): duplicate job/email within dedup window.
+2026-03-22 15:52:14,705 [INFO] Done. Processed 50 rows.

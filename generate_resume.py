@@ -17,6 +17,7 @@ from pathlib import Path
 import pandas as pd
 import requests
 
+from email_sends_db import TABLE_GENERATE_RESUME
 from send_generated_resume_email import send_email_for_row
 
 
@@ -710,7 +711,15 @@ def main() -> None:
             skipped_no_email += 1
             logger.info("[%d/%d] Skipped sending (no valid email).", i + 1, total)
         else:
-            if send_email_for_row(row, str(pdf_path), logger, dry_run=args.dry_run):
+            if send_email_for_row(
+                row,
+                str(pdf_path),
+                logger,
+                dry_run=args.dry_run,
+                region=region,
+                excel_path=args.excel_path,
+                log_table=TABLE_GENERATE_RESUME,
+            ):
                 sent += 1
             if i < total - 1 and not args.dry_run:
                 logger.info("Waiting 10 seconds before next email...")

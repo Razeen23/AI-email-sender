@@ -12,6 +12,16 @@ from pathlib import Path
 
 import requests
 
+from email_sends_db import (
+    TABLE_SEND_GENERATED_RESUME_EMAIL,
+    duplicate_skip_reason,
+    has_recent_application,
+    init_db,
+    is_dedup_enabled,
+    is_logging_enabled,
+    log_email_send,
+)
+
 BODY_MAX_CHARS = 2000
 
 REQUIRED_ENV = ("SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "FROM_EMAIL")
@@ -169,6 +179,18 @@ Candidate profile:
         return None
 
 
+def _subject_for_send(company: str, role: str) -> str:
+    has_role = (role or "").strip()
+    has_company = (company or "").strip()
+    if not has_role and not has_company:
+        return "Reaching out"
+    if not has_role:
+        return f"Reaching out – {company}"
+    if not has_company:
+        return f"Application for {role}"
+    return f"Application for {role} at {company}"
+
+
 def _build_and_send(
     to_email: str,
     company: str,
@@ -178,18 +200,9 @@ def _build_and_send(
     config: dict,
     dry_run: bool,
     logger: logging.Logger,
-) -> bool:
+) -> tuple[bool, str | None]:
     msg = EmailMessage()
-    has_role = (role or "").strip()
-    has_company = (company or "").strip()
-    if not has_role and not has_company:
-        subject = "Reaching out"
-    elif not has_role:
-        subject = f"Reaching out – {company}"
-    elif not has_company:
-        subject = f"Application for {role}"
-    else:
-        subject = f"Application for {role} at {company}"
+    subject = _subject_for_send(company, role)
     msg["Subject"] = subject
     msg["From"] = config["from_email"]
     msg["To"] = to_email
@@ -198,7 +211,7 @@ def _build_and_send(
         msg.add_attachment(f.read(), maintype="application", subtype="pdf", filename=Path(resume_path).name)
     if dry_run:
         logger.info("[DRY-RUN] Would send to %s (Company: %s, Role: %s)", to_email, company, role)
-        return True
+        return True, None
     try:
         if config["smtp_port"] == 465:
             with smtplib.SMTP_SSL(config["smtp_host"], config["smtp_port"]) as smtp:
@@ -210,10 +223,10 @@ def _build_and_send(
                 smtp.login(config["smtp_user"], config["smtp_password"])
                 smtp.send_message(msg)
         logger.info("Sent to %s (Company: %s, Role: %s)", to_email, company, role)
-        return True
+        return True, None
     except smtplib.SMTPException as e:
         logger.exception("SMTP failed for %s: %s", to_email, e)
-        return False
+        return False, str(e) or type(e).__name__
 
 
 def send_email_for_row(
@@ -221,24 +234,86 @@ def send_email_for_row(
     resume_path: str,
     logger: logging.Logger,
     dry_run: bool = False,
+    region: str | None = None,
+    excel_path: str | None = None,
+    log_table: str = TABLE_SEND_GENERATED_RESUME_EMAIL,
 ) -> bool:
     """
     Send one email for the given row with the generated resume PDF attached.
     row must have Company, Role, Email; optional Name, Job Description.
     Returns True if sent (or dry-run), False on config/body/send failure.
     """
+    if is_logging_enabled():
+        init_db()
+
+    to_email = str(row.get("Email", "")).strip()
+    company = str(row.get("Company", "")).strip()
+    role = str(row.get("Role", "")).strip()
+    rp = Path(resume_path)
+    pdf_path_str = str(rp.resolve()) if resume_path else None
+    pdf_name = rp.name if resume_path else None
+    subj = _subject_for_send(company, role)
+
     config = get_config()
     if not config:
         logger.error("SMTP not configured. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, FROM_EMAIL in .env")
+        log_email_send(
+            log_table,
+            recipient_email=to_email or "",
+            success=False,
+            dry_run=dry_run,
+            company=company or None,
+            role=role or None,
+            region=region,
+            subject=subj,
+            pdf_path=pdf_path_str,
+            pdf_filename=pdf_name,
+            excel_path=excel_path,
+            failure_reason="no_config",
+        )
         return False
 
-    to_email = str(row.get("Email", "")).strip()
     if not to_email or "@" not in to_email:
         logger.warning("Row has no valid Email; cannot send.")
+        log_email_send(
+            log_table,
+            recipient_email=to_email or "",
+            success=False,
+            dry_run=dry_run,
+            company=company or None,
+            role=role or None,
+            region=region,
+            subject=subj,
+            pdf_path=pdf_path_str,
+            pdf_filename=pdf_name,
+            excel_path=excel_path,
+            failure_reason="invalid_email",
+        )
         return False
 
-    company = str(row.get("Company", "")).strip()
-    role = str(row.get("Role", "")).strip()
+    if is_dedup_enabled() and has_recent_application(to_email, company or None, role or None):
+        logger.info(
+            "Skipping %s (Company: %s, Role: %s): duplicate job/email within dedup window.",
+            to_email,
+            company,
+            role,
+        )
+        log_email_send(
+            log_table,
+            recipient_email=to_email,
+            success=False,
+            dry_run=dry_run,
+            company=company or None,
+            role=role or None,
+            region=region,
+            subject=subj,
+            pdf_path=pdf_path_str,
+            pdf_filename=pdf_name,
+            excel_path=excel_path,
+            failure_reason=duplicate_skip_reason(),
+        )
+        return False
+
     name = row.get("Name")
     if name is None or (isinstance(name, float) and name != name):
         name = ""
@@ -254,6 +329,20 @@ def send_email_for_row(
     body = generate_body(company, role, name, job_description, profile_text, config, logger)
     if not body:
         logger.warning("No email body generated; skipping send.")
+        log_email_send(
+            log_table,
+            recipient_email=to_email,
+            success=False,
+            dry_run=dry_run,
+            company=company or None,
+            role=role or None,
+            region=region,
+            subject=subj,
+            pdf_path=pdf_path_str,
+            pdf_filename=pdf_name,
+            excel_path=excel_path,
+            failure_reason="no_body_generated",
+        )
         return False
 
     if profile_text:
@@ -262,4 +351,19 @@ def send_email_for_row(
         if signature_block:
             body = body + "\n\n" + signature_block
 
-    return _build_and_send(to_email, company, role, body, resume_path, config, dry_run, logger)
+    ok, err = _build_and_send(to_email, company, role, body, resume_path, config, dry_run, logger)
+    log_email_send(
+        log_table,
+        recipient_email=to_email,
+        success=ok,
+        dry_run=dry_run,
+        company=company or None,
+        role=role or None,
+        region=region,
+        subject=subj,
+        pdf_path=pdf_path_str,
+        pdf_filename=pdf_name,
+        excel_path=excel_path,
+        failure_reason=err,
+    )
+    return ok

@@ -1,0 +1,9 @@
+2026-03-22 11:44:26,160 [INFO] Starting email sender2: excel=INR_Excel/job_listings_last24hours.xlsx region=INR dry_run=False ollama=http://localhost:11434
+2026-03-22 11:44:26,267 [INFO] Loaded 3 recipients from Excel.
+2026-03-22 11:44:26,267 [INFO] Loaded profile from profile.txt.
+2026-03-22 11:44:59,598 [INFO] Sent to makerrazeen2301@gmail.com (Company: FLSmidth, Role: Senior Edge Developer)
+2026-03-22 11:44:59,606 [INFO] Waiting 10 seconds before next email...
+2026-03-22 11:45:37,241 [INFO] Sent to makerrazeen2301@gmail.com (Company: CLARITY TTS, Role: Senior / Lead Full Stack Developer)
+2026-03-22 11:45:37,251 [INFO] Waiting 10 seconds before next email...
+2026-03-22 11:46:11,668 [INFO] Sent to makerrazeen2301@gmail.com (Company: UPS, Role: Intermediate Application Developer – eCommerce)
+2026-03-22 11:46:11,674 [INFO] Done. Processed 3 rows.
