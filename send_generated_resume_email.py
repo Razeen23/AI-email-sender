@@ -6,11 +6,14 @@ Standalone: no dependency on send_emails.py. Requires SMTP and optional Ollama e
 
 import logging
 import os
+import re
 import smtplib
 from email.message import EmailMessage
 from pathlib import Path
 
 import requests
+
+from fallback_email_body import build_fallback_application_body
 
 from email_sends_db import (
     TABLE_SEND_GENERATED_RESUME_EMAIL,
@@ -23,6 +26,29 @@ from email_sends_db import (
 )
 
 BODY_MAX_CHARS = 2000
+
+_SUBJECT_HEADER_LINE_RE = re.compile(
+    r"^(?:\*\*)?(?:subject|email\s*subject|subject\s*line)(?:\*\*)?\s*:.*$",
+    re.I,
+)
+
+
+def strip_leading_subject_line(body: str) -> str:
+    if not (body or "").strip():
+        return body or ""
+    lines = body.split("\n")
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if not stripped:
+            i += 1
+            continue
+        if _SUBJECT_HEADER_LINE_RE.match(stripped):
+            i += 1
+            continue
+        break
+    return "\n".join(lines[i:]).lstrip()
+
 
 REQUIRED_ENV = ("SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "FROM_EMAIL")
 OPTIONAL_ENV = {
@@ -118,6 +144,7 @@ def generate_body(
     profile_text: str | None,
     config: dict,
     logger: logging.Logger,
+    ollama_state: dict | None = None,
 ) -> str | None:
     url = f"{config['ollama_base_url']}/api/generate"
     is_cold_email = not (role or "").strip()
@@ -133,11 +160,11 @@ def generate_body(
     if is_cold_email:
         prompt += """
 - This is a cold email (no specific role in the listing). Write as someone exploring opportunities, interested in the company, and open to relevant roles. Do not mention a specific job title.
-- Professional tone, not robotic. No subject line. End with a sign-off like "Best regards". Do not include placeholders like [Your Name]. Keep it concise."""
+- Professional tone, not robotic. Do not write "Subject:" or any email header—the subject is set separately; start with the greeting. End with a sign-off like "Best regards". Do not include placeholders like [Your Name]. Keep it concise."""
     else:
         prompt += f"""
 - Mention the company name and the role "{role}" naturally.
-- Professional tone, not robotic. No subject line. End with a sign-off like "Best regards". Do not include placeholders like [Your Name]. Keep it concise."""
+- Professional tone, not robotic. Do not write "Subject:" or any email header—the subject is set separately; start with the greeting. End with a sign-off like "Best regards". Do not include placeholders like [Your Name]. Keep it concise."""
     if name and str(name).strip():
         prompt += f"\n- You may reference that you were referred by {name} if it fits naturally."
 
@@ -172,11 +199,18 @@ Candidate profile:
         resp = requests.post(url, json=payload, timeout=120)
         resp.raise_for_status()
         data = resp.json()
-        body = (data.get("response") or "").strip()[:BODY_MAX_CHARS]
-        return body or None
+        body = strip_leading_subject_line((data.get("response") or "").strip())[:BODY_MAX_CHARS]
+        if body:
+            return body
+        if ollama_state is not None and not ollama_state.get("empty_body_warned"):
+            logger.warning("Ollama returned an empty body; using template email body.")
+            ollama_state["empty_body_warned"] = True
+        return build_fallback_application_body(company, role, name, max_chars=BODY_MAX_CHARS)
     except requests.RequestException as e:
-        logger.exception("Ollama request failed: %s", e)
-        return None
+        if ollama_state is not None and not ollama_state.get("ollama_unreachable_warned"):
+            logger.warning("Ollama request failed (%s); using template email body.", e)
+            ollama_state["ollama_unreachable_warned"] = True
+        return build_fallback_application_body(company, role, name, max_chars=BODY_MAX_CHARS)
 
 
 def _subject_for_send(company: str, role: str) -> str:
@@ -237,6 +271,7 @@ def send_email_for_row(
     region: str | None = None,
     excel_path: str | None = None,
     log_table: str = TABLE_SEND_GENERATED_RESUME_EMAIL,
+    ollama_state: dict | None = None,
 ) -> bool:
     """
     Send one email for the given row with the generated resume PDF attached.
@@ -326,7 +361,10 @@ def send_email_for_row(
         job_description = str(jd).strip() or None
 
     profile_text = load_profile(config["profile_file"])
-    body = generate_body(company, role, name, job_description, profile_text, config, logger)
+    state = ollama_state if ollama_state is not None else {}
+    body = generate_body(
+        company, role, name, job_description, profile_text, config, logger, ollama_state=state
+    )
     if not body:
         logger.warning("No email body generated; skipping send.")
         log_email_send(

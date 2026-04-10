@@ -664,6 +664,7 @@ def main() -> None:
     failed = 0
     sent = 0
     skipped_no_email = 0
+    ollama_state: dict = {}
 
     for i, row in enumerate(rows):
         company = str(row.get("Company", "")).strip()
@@ -719,6 +720,7 @@ def main() -> None:
                 region=region,
                 excel_path=args.excel_path,
                 log_table=TABLE_GENERATE_RESUME,
+                ollama_state=ollama_state,
             ):
                 sent += 1
             if i < total - 1 and not args.dry_run:

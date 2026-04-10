@@ -1,0 +1,8 @@
+2026-04-10 01:13:01,699 [INFO] Starting email sender: excel=INR_Excel/gen-ai-list_test.xlsx region=INR dry_run=False ollama=http://localhost:11434
+2026-04-10 01:13:01,863 [INFO] Loaded 4 recipients from Excel.
+2026-04-10 01:13:01,863 [INFO] Loaded profile from profile.txt.
+2026-04-10 01:13:01,866 [INFO] Skipping makerrazeen2301@gmail.com (Company: Idea Elan, Role: AI Engineer): duplicate job/email within dedup window.
+2026-04-10 01:13:01,868 [INFO] Skipping makerrazeen2301@gmail.com (Company: Synycs Group, Role: AI Developer – 1 to 2 Years Experience): duplicate job/email within dedup window.
+2026-04-10 01:13:01,869 [INFO] Skipping makerrazeen2301@gmail.com (Company: OPTISOL Business Solutions, Role: Generative AI Engineer): duplicate job/email within dedup window.
+2026-04-10 01:13:01,870 [INFO] Skipping makerrazeen2301@gmail.com (Company: Geneerix Innovations Private Limited, Role: Python AI Backend Engineer): duplicate job/email within dedup window.
+2026-04-10 01:13:01,871 [INFO] Done. Processed 4 rows.

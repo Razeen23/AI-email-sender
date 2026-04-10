@@ -72,10 +72,10 @@ Columns (names normalized): `company name`, `role`, `HR email`, `referal name` (
 
 ## Resume selection
 
-- **INR:** `resumes/INR/` — e.g. `front-end-inr`, `full-stack-inr`, `react-js-inr`. Unmatched roles use `full-stack-inr`.
-- **UAE:** `resumes/UAE/` — e.g. `front-end-uae`, `full-stack-uae`, `react-js-uae`, `gen-ai-uae`. Unmatched roles use `full-stack-uae`.
+- **INR:** `resumes/INR/` — e.g. `front-end-inr`, `full-stack-inr`, `react-js-inr`, **`gen-ai`** (no `-inr` suffix). Unmatched roles use `full-stack-inr`.
+- **UAE:** `resumes/UAE/` — e.g. `front-end-uae`, `full-stack-uae`, `react-js-uae`, **`gen-ai-uae`**. Unmatched roles use `full-stack-uae`.
 
-Role is matched (case-insensitive) to keywords: frontend, full stack, react, gen ai (UAE only). The first PDF in the chosen folder is attached.
+Gen-AI resume is used if **the role, job description, or (in `send_emails2.py`) Key Skills / Why Match** mention AI-related terms (e.g. gen AI, genai, AI/ML, LLM, RAG, AI engineer, standalone “AI”, etc.). That way a generic title like “Software Engineer” still gets the gen-ai PDF when the JD is AI-focused. Otherwise the **Role** column alone picks frontend / full-stack / react. The first PDF in the chosen folder is attached.
 
 ## Logs
 

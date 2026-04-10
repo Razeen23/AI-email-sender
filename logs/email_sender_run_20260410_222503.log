@@ -1,0 +1,7 @@
+2026-04-10 22:25:03,640 [INFO] Starting email sender: excel=INR_Excel/gen-ai-list_test.xlsx region=INR dry_run=False ollama=http://localhost:11434
+2026-04-10 22:25:03,749 [INFO] Loaded 4 recipients from Excel.
+2026-04-10 22:25:03,750 [INFO] Loaded profile from profile.txt.
+2026-04-10 22:26:00,038 [INFO] Sent to makerrazeenn2301@gmail.com (Company: Idea Elan, Role: AI Engineer)
+2026-04-10 22:26:00,050 [INFO] Waiting 10 seconds before next email...
+2026-04-10 22:26:55,539 [INFO] Sent to makerrazeenn2301@gmail.com (Company: Synycs Group, Role: AI Developer – 1 to 2 Years Experience)
+2026-04-10 22:26:55,555 [INFO] Waiting 10 seconds before next email...

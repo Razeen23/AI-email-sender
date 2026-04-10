@@ -32,6 +32,8 @@ from email_sends_db import (
     is_logging_enabled,
     log_email_send,
 )
+from fallback_email_body import build_fallback_application_body
+from resume_selection import get_resume_path
 
 
 # --- .env loading (no external lib) ---
@@ -61,15 +63,6 @@ OPTIONAL_ENV = {
 }
 DELAY_SECONDS = 10
 BODY_MAX_CHARS = 2000
-
-# Role (normalized) -> folder name (suffix without region)
-ROLE_TO_FOLDER = [
-    (re.compile(r"frontend|front\s*end", re.I), "front-end"),
-    (re.compile(r"full\s*stack|fullstack", re.I), "full-stack"),
-    (re.compile(r"react\s*js|react", re.I), "react-js"),
-    (re.compile(r"gen\s*ai|generative\s*ai|\bai\b", re.I), "gen-ai"),  # UAE only
-]
-DEFAULT_FOLDER = "full-stack"
 
 
 def get_config():
@@ -194,49 +187,6 @@ def load_excel(excel_path: str, logger: logging.Logger) -> pd.DataFrame:
     return df
 
 
-def role_to_folder(role: str, region: str) -> str:
-    r = (role or "").strip().lower()
-    for pattern, folder in ROLE_TO_FOLDER:
-        if pattern.search(r):
-            if folder == "gen-ai" and region != "UAE":
-                continue
-            return f"{folder}-{region.lower()}"
-    return f"{DEFAULT_FOLDER}-{region.lower()}"
-
-
-def get_resume_path(resumes_base: str, region: str, role: str, logger: logging.Logger) -> str | None:
-    """Pick resume from resumes/INR or resumes/UAE (by Excel). Within that, choose folder and PDF by role. Do not use generated/."""
-    folder_name = role_to_folder(role, region)
-    dir_path = Path(resumes_base) / region / folder_name
-    if not dir_path.is_dir():
-        default_resume = (
-            Path(resumes_base) / "INR" / "full-stack-inr" / "Full-stack-developer-CV-Razeen.pdf"
-            if region == "INR"
-            else Path(resumes_base) / "UAE" / "full-stack-uae" / "Full-stack-developer-CV-Razeen.pdf"
-        )
-        if default_resume.is_file():
-            logger.warning("Resume directory not found: %s. Falling back to %s", dir_path, default_resume)
-            return str(default_resume)
-        logger.error("Resume directory not found: %s (and default resume missing at %s)", dir_path, default_resume)
-        return None
-    pdfs = sorted(
-        [f for f in dir_path.iterdir() if f.suffix.lower() == ".pdf" and ".." not in f.name],
-        key=lambda p: p.name,
-    )
-    if not pdfs:
-        default_resume = (
-            Path(resumes_base) / "INR" / "full-stack-inr" / "Full-stack-developer-CV-Razeen.pdf"
-            if region == "INR"
-            else Path(resumes_base) / "UAE" / "full-stack-uae" / "Full-stack-developer-CV-Razeen.pdf"
-        )
-        if default_resume.is_file():
-            logger.warning("No PDF found in %s. Falling back to %s", dir_path, default_resume)
-            return str(default_resume)
-        logger.error("No PDF found in %s (and default resume missing at %s)", dir_path, default_resume)
-        return None
-    return str(pdfs[0])
-
-
 def _normalize_cell(val) -> str:
     if val is None or (isinstance(val, float) and pd.isna(val)):
         return ""
@@ -321,6 +271,30 @@ def strip_trailing_sign_off(body: str) -> str:
     return "\n".join(lines).rstrip()
 
 
+_SUBJECT_HEADER_LINE_RE = re.compile(
+    r"^(?:\*\*)?(?:subject|email\s*subject|subject\s*line)(?:\*\*)?\s*:.*$",
+    re.I,
+)
+
+
+def strip_leading_subject_line(body: str) -> str:
+    """Remove Subject: lines the model sometimes prepends (the real subject is set on the email, not in the body)."""
+    if not (body or "").strip():
+        return body or ""
+    lines = body.split("\n")
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if not stripped:
+            i += 1
+            continue
+        if _SUBJECT_HEADER_LINE_RE.match(stripped):
+            i += 1
+            continue
+        break
+    return "\n".join(lines[i:]).lstrip()
+
+
 _EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.I)
 _URL_RE = re.compile(r"https?://\S+", re.I)
 _PHONE_RE = re.compile(r"(\+\d[\d\s-]{6,}\d)")
@@ -364,6 +338,7 @@ def generate_body(
     profile_text: str | None,
     config: dict,
     logger: logging.Logger,
+    ollama_state: dict | None = None,
 ) -> str | None:
     url = f"{config['ollama_base_url']}/api/generate"
     role_clean = _normalize_cell(role)
@@ -377,20 +352,21 @@ def generate_body(
 2. About me and the role I am applying for
 3. About my achievements and experience (1–2 strongest, relevant points)
 4. How I can add value in their company
-Do not add any contact details (no name/email/phone/portfolio/links), do not include any URLs (including job links), and do not add "Signature", "Best regards", "Sincerely", or any sign-off—only the main email content. A full signature block is added automatically; do not duplicate it."""
+Do not add any contact details (no name/email/phone/portfolio/links), do not include any URLs (including job links), and do not add "Signature", "Best regards", "Sincerely", or any sign-off—only the main email content. A full signature block is added automatically; do not duplicate it.
+Do not write "Subject:", "Email subject:", or any email header line—the subject is set separately; start directly with the greeting (e.g. Dear Hiring Team)."""
 
     if company_clean:
         prompt = f"""Write a short, professional job application email body.
 - Addressed to the hiring team at {company_clean}.
 {structure}
 - Mention the company name and the role "{role_clean}" naturally.
-- Professional tone, not robotic. No subject line. Keep it concise."""
+- Professional tone, not robotic. Do not write "Subject:" or any email header; start with the greeting. Keep it concise."""
     else:
         prompt = f"""Write a short, professional job application email body.
 - Addressed to the hiring team. Do not use or guess the company name; keep it anonymous and use "your team" or "the company".
 {structure}
 - Mention the role "{role_clean}" naturally.
-- Professional tone, not robotic. No subject line. Keep it concise."""
+- Professional tone, not robotic. Do not write "Subject:" or any email header; start with the greeting. Keep it concise."""
 
     if has_key_skills:
         prompt += f"""
@@ -433,10 +409,17 @@ Candidate profile:
         resp.raise_for_status()
         data = resp.json()
         body = (data.get("response") or "").strip()[:BODY_MAX_CHARS]
-        return body or None
+        if body:
+            return body
+        if ollama_state is not None and not ollama_state.get("empty_body_warned"):
+            logger.warning("Ollama returned an empty body; using template email body.")
+            ollama_state["empty_body_warned"] = True
+        return build_fallback_application_body(company, role, "", max_chars=BODY_MAX_CHARS)
     except requests.RequestException as e:
-        logger.exception("Ollama request failed: %s", e)
-        return None
+        if ollama_state is not None and not ollama_state.get("ollama_unreachable_warned"):
+            logger.warning("Ollama request failed (%s); using template email body.", e)
+            ollama_state["ollama_unreachable_warned"] = True
+        return build_fallback_application_body(company, role, "", max_chars=BODY_MAX_CHARS)
 
 
 def build_and_send(
@@ -516,6 +499,8 @@ def main() -> None:
     if profile_text:
         logger.info("Loaded profile from %s.", config["profile_file"])
 
+    ollama_state: dict = {}
+
     for i, row in enumerate(rows):
         company = _normalize_cell(row.get("Company", ""))
         role = _normalize_cell(row.get("Role", ""))
@@ -539,7 +524,15 @@ def main() -> None:
         else:
             why_match = str(why_match).strip() or None
 
-        resume_path = get_resume_path(config["resumes_base"], region, role, logger)
+        resume_path = get_resume_path(
+            config["resumes_base"],
+            region,
+            role,
+            logger,
+            job_description=job_description,
+            key_skills=key_skills,
+            why_match=why_match,
+        )
         if not resume_path:
             log_email_send(
                 TABLE_SEND_EMAILS2,
@@ -579,7 +572,17 @@ def main() -> None:
             )
             continue
 
-        body = generate_body(company, role, job_description, key_skills, why_match, profile_text, config, logger)
+        body = generate_body(
+            company,
+            role,
+            job_description,
+            key_skills,
+            why_match,
+            profile_text,
+            config,
+            logger,
+            ollama_state=ollama_state,
+        )
         if not body:
             logger.warning("Skipping %s: no body generated.", to_email)
             rp = Path(resume_path)
@@ -599,7 +602,9 @@ def main() -> None:
             )
             continue
 
-        body = strip_trailing_sign_off(strip_trailing_contact_block(strip_trailing_sign_off(body)))
+        body = strip_leading_subject_line(
+            strip_trailing_sign_off(strip_trailing_contact_block(strip_trailing_sign_off(body)))
+        )
         body = body + "\n\n" + get_signature_block(region)
 
         ok, err = build_and_send(to_email, company, role, body, resume_path, config, args.dry_run, logger)

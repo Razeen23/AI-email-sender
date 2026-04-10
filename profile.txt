@@ -154,15 +154,189 @@ CI/CD & Deployment Automation
 • Implemented SSH-based deployments to production servers, eliminating manual FTP usage.
 • Reduced release cycles by 5× and deployment-related issues by 90%.
 
-AI-Powered Support Automation System (Current)
+HOSTZOP SUPPORT AI (suppot-ai/Hostzop-support-AI)
 
-Tech: Python, FastAPI, LangChain, RAG, Pinecone, FAISS
+ONE-LINE SUMMARY
+AI-powered hosting / IT support assistant that answers from live MySQL data
+(e.g. WHMCS) using RAG, with a FastAPI backend and a React + Vite chat UI:
+client verification, ticket creation, SSH-based server diagnostics, and
+conversation logging.
 
-• Developing an AI-driven support system to assist clients with server and application issues in a SaaS environment.
-• Implemented Retrieval-Augmented Generation (RAG) using LangChain with Pinecone and FAISS, trained on internal knowledge bases.
-• Built backend services using FastAPI (Python) for AI inference and support workflows.
-• Enabled controlled automation for common setup and troubleshooting tasks.
-• Integrated an automatic ticket escalation system when issues cannot be resolved by AI.
+THE NEED / PROBLEM
+Support teams repeat the same lookups (client account, server context, runbooks).
+Customers wait on humans for questions that could be answered from structured
+data and internal knowledge. The system grounds answers in your database and can
+escalate (e.g. open a ticket) when automation is not enough.
+
+REAL-TIME / BUSINESS IMPACT (phrase honestly)
+- Faster first response: answers tied to actual client/server context instead of
+  generic chat.
+- Safer triage: optional WHMCS flows for verify email and open ticket when a fix
+  fails.
+- Auditability: chats stored in support_conversations for review and training.
+- Operational use: SSH / terminal paths support live server investigation
+  (where network and security policy allow).
+
+TECH STACK
+- Backend: Python, FastAPI, Uvicorn, LangChain ecosystem, FAISS, PyMySQL,
+  Pydantic, Paramiko (SSH), httpx
+- LLM: Ollama (e.g. llama3.2, nomic-embed-text) and/or Google Gemini
+  (gemini-1.5-pro) in the chatbot-google variant
+- Data: MySQL tables to embeddings/index; PDF RAG variant also in project
+- Integrations: WHMCS API (client lookup, validate login, open ticket)
+- Frontend: React, Vite, xterm (in-browser terminal)
+
+ACHIEVEMENTS (technical — safe if you built/shipped it)
+- Delivered an end-to-end RAG pipeline from MySQL to vector search to grounded
+  answers.
+- Shipped a production-style API with health checks, chat, and server/terminal-
+  related endpoints.
+- Integrated billing/support CRM (WHMCS) for identity and ticketing, reducing
+  context-switching for agents.
+- Implemented persistent conversation logging for analytics and quality control.
+
+SAMPLE RESUME BULLETS
+- Built an AI support assistant using RAG over MySQL/WHMCS data (FAISS, LangChain)
+  with FastAPI and a React + Vite chat UI.
+- Integrated WHMCS API for client verification and ticket creation; logged
+  conversations to MySQL for audit and improvement.
+- Added SSH-backed server diagnostics and terminal UI (Paramiko, xterm) for
+  operations workflows.
+
+
+2. AI EMAIL SENDER (email-sender)
+
+ONE-LINE SUMMARY
+Python automation that reads job-lead spreadsheets (India / UAE regions), picks
+the right resume PDF by role, generates personalized application email bodies
+with a local LLM (Ollama), and sends via SMTP—with optional per-job resume
+generation (Markdown → PDF) and SQLite-backed logging and deduplication.
+
+THE NEED / PROBLEM
+High-volume job search means repeating the same steps: open spreadsheet, read
+role and JD, tailor a message, attach the correct resume, send safely without
+spamming duplicates. Manual work is slow and error-prone; generic blast emails
+perform poorly.
+
+REAL-TIME / BUSINESS IMPACT (phrase honestly — personal productivity / job search)
+- Scales outreach while keeping messages aligned to role and (when provided)
+  job description—without inventing skills you did not put in profile.txt.
+- Rate-limited sending (e.g. delay between messages) and dry-run mode reduce
+  mistakes and provider throttling.
+- SQLite logs and optional deduplication (same job/email window) support
+  traceability and avoid duplicate applications.
+- Optional pipeline: one tailored resume PDF per company/role from profile +
+  JD, then email with that attachment.
+
+TECH STACK
+- Python: pandas, openpyxl (Excel), requests (Ollama HTTP API), smtplib (SMTP)
+- LLM: Ollama (e.g. llama3.2) for email bodies and resume Markdown generation
+- Documents: markdown, WeasyPrint (Markdown → PDF; falls back to .md if PDF
+  tooling unavailable)
+- Data: SQLite (email_sends_db — send history, dedup windows per script)
+- Config: .env (SMTP, Ollama URL/model, paths to resumes and profile.txt)
+- Inputs: Excel columns (normalized)—company name, role, HR email, optional
+  referral, optional job description
+
+KEY FLOWS (for resume talking points)
+- send_emails.py — region-aware (INR/UAE) resume folders, role-to-folder
+  matching, AI-generated body, attach PDF, optional company-specific generated PDF.
+- send_emails2.py — INR job listings with JD + skills tailoring (per README).
+- generate_resume.py + send_generated_resume_email.py — per-row tailored resume
+  PDF, then one email per new file; skips rows without JD or when PDF exists.
+
+ACHIEVEMENTS (technical — safe if you built/shipped it)
+- End-to-end pipeline from spreadsheet → LLM personalization → SMTP, with
+  logging and duplicate protection.
+- Grounded personalization: profile-driven content; JD used to tailor without
+  claiming skills absent from the profile (as documented).
+- Multi-region asset layout (INR/UAE) and role-based resume selection; optional
+  AI-generated PDFs per company/role.
+
+SAMPLE RESUME BULLETS
+- Automated bulk job applications: Excel-driven pipeline with Ollama-generated
+  email bodies, SMTP delivery, SQLite audit log, and configurable deduplication.
+- Built optional JD-aware resume generation (Markdown → PDF via WeasyPrint) and
+  integrated send-after-generate flow for company-specific attachments.
+- Implemented dry-run mode, staggered sends, and INR/UAE resume routing by role
+  keywords (frontend, full stack, React, gen AI where applicable).
+
+
+3. FACE RECOGNITION PHOTO GROUPING DASHBOARD (group-photos)
+
+ONE-LINE SUMMARY
+Web app that detects faces, embeds them, and groups photos by person (Google
+Photos–style "People"), with async processing and a modern dashboard.
+
+THE NEED
+Manual sorting of large photo sets is slow; teams and events need automatic
+clustering by identity with a usable UI.
+
+BUSINESS IMPACT
+- Less manual labeling for media-heavy workflows (events, marketing libraries,
+  internal archives).
+- Scalable pattern: object storage + database + API separates blobs from metadata.
+
+TECH STACK
+- FastAPI, InsightFace, PostgreSQL + pgvector, MinIO (S3-compatible), optional
+  Redis/Celery, Alembic migrations
+- React, TypeScript, Vite, Tailwind CSS, TanStack Query, Axios
+
+ACHIEVEMENTS
+- Face-centric model supporting multi-face photos and grouping by similarity.
+- Vector search in Postgres for scalable "same person" retrieval.
+- REST API for upload, images, groups, and processing status.
+
+SAMPLE RESUME BULLETS
+- Developed a face grouping dashboard: InsightFace + pgvector for similarity
+  search, MinIO for images, FastAPI + React/TypeScript/Tailwind frontend.
+- Implemented async image processing and person-group browsing (People /
+  Images flows per product design).
+
+4. EARNINGS CALL ANALYZER (call-transcripts)
+
+ONE-LINE SUMMARY
+Streamlit app to ingest earnings call PDFs, build a vector store, and support
+Q&A, summarization, and topic extraction using Google Gemini-style generation.
+
+THE NEED
+Finance and strategy teams need fast extraction of themes, numbers, and quotes
+from long transcripts without reading hundreds of pages.
+
+BUSINESS IMPACT
+- Shorter research cycles for analysts and product/strategy roles.
+- Source-grounded answers when retrieval is tied to transcript chunks.
+
+TECH STACK
+Streamlit, pandas, PDF processing, vector store + search, Google Gemini API.
+
+ACHIEVEMENTS
+- RAG-style Q&A over documents with relevance-scored chunks.
+- Summaries and topic discovery on top of raw transcript text.
+
+SAMPLE RESUME BULLETS
+- Built a Streamlit app for earnings call PDFs: vector search + Gemini for
+  grounded Q&A, summaries, and topic extraction.
+
+
+5. OLLAMA + FASTAPI (Web-site-chatbot/ollama-fastapi) — supporting utility
+
+SUMMARY
+Small local FastAPI service exposing embeddings and chat via Ollama—useful as a
+building block for other apps (no cloud API keys in dev).
+
+RESUME USE
+Best as a supporting bullet under a larger project unless deployed standalone.
+
+
+GENERAL RESUME TIPS
+
+- Match job title to reality: e.g. "AI / Full-Stack Developer" only if accurate.
+- Lead with outcomes you can defend: integrations shipped, RAG over MySQL,
+  automated outreach with logging—not unverified "50% efficiency" claims.
+- Hostzop reads as a product/support automation story; email-sender reads as
+  automation + LLM personalization + responsible dedup/logging—tune tone to the
+  job (employer tools vs. personal job-search tooling).
 
 ⸻
 

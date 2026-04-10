@@ -1,0 +1,11 @@
+2026-04-10 00:47:05,740 [INFO] Starting email sender: excel=INR_Excel/gen-ai-list_test.xlsx region=INR dry_run=False ollama=http://localhost:11434
+2026-04-10 00:47:05,863 [INFO] Loaded 4 recipients from Excel.
+2026-04-10 00:47:05,864 [INFO] Loaded profile from profile.txt.
+2026-04-10 00:47:39,419 [INFO] Sent to makerrazeen2301@gmail.com (Company: Idea Elan, Role: AI Engineer)
+2026-04-10 00:47:39,432 [INFO] Waiting 10 seconds before next email...
+2026-04-10 00:48:21,509 [INFO] Sent to makerrazeen2301@gmail.com (Company: Synycs Group, Role: AI Developer – 1 to 2 Years Experience)
+2026-04-10 00:48:21,527 [INFO] Waiting 10 seconds before next email...
+2026-04-10 00:49:02,392 [INFO] Sent to makerrazeen2301@gmail.com (Company: OPTISOL Business Solutions, Role: Generative AI Engineer)
+2026-04-10 00:49:02,404 [INFO] Waiting 10 seconds before next email...
+2026-04-10 00:49:38,498 [INFO] Sent to makerrazeen2301@gmail.com (Company: Geneerix Innovations Private Limited, Role: Python AI Backend Engineer)
+2026-04-10 00:49:38,510 [INFO] Done. Processed 4 rows.
