@@ -32,8 +32,9 @@ from email_sends_db import (
     is_logging_enabled,
     log_email_send,
 )
+from cold_email import cold_prompt, cold_subject, ensure_role_column, is_cold_email
 from fallback_email_body import build_fallback_application_body
-from resume_selection import get_resume_path
+from resume_selection import get_resume_path, region_resume_dir
 
 
 # --- .env loading (no external lib) ---
@@ -141,8 +142,8 @@ def _canon(s: str) -> str:
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Normalize multiple possible header spellings to internal names.
 
-    Required internal columns: Company, Role, Email
-    Optional: Job Description, Key Skills, Why Match
+    Required internal columns: Company, Email
+    Optional: Role (missing or blank means a cold email), Job Description, Key Skills, Why Match
     """
     col_map: dict[object, str] = {}
     for c in df.columns:
@@ -171,12 +172,12 @@ def load_excel(excel_path: str, logger: logging.Logger) -> pd.DataFrame:
     if not os.path.isfile(excel_path):
         sys.exit(f"Excel file not found: {excel_path}")
     df = pd.read_excel(excel_path, engine="openpyxl")
-    df = normalize_columns(df)
-    required = {"Company", "Role", "Email"}
+    df = ensure_role_column(normalize_columns(df))
+    required = {"Company", "Email"}
     missing = required - set(df.columns)
     if missing:
         sys.exit(
-            f"Excel missing columns (after mapping): {missing}. Expected Company Name, Role, HR Email."
+            f"Excel missing columns (after mapping): {missing}. Expected Company Name and HR Email. Role is optional."
         )
     before = len(df)
     df = df.dropna(subset=["Email"])
@@ -195,18 +196,23 @@ def _normalize_cell(val) -> str:
 
 
 def get_subject(company: str, role: str) -> str:
-    has_role = _normalize_cell(role)
     has_company = _normalize_cell(company)
-    if not has_role and not has_company:
-        return "Reaching out"
-    if not has_role:
-        return f"Reaching out – {company}"
+    if is_cold_email(role):
+        return cold_subject(has_company)
     if not has_company:
         return f"Application for {role}"
     return f"Application for {role} at {company}"
 
 
 def load_profile(config: dict, logger: logging.Logger) -> str | None:
+    try:
+        from backend.services.profile_service import email_profile_or_none
+
+        rendered = email_profile_or_none()
+        if rendered:
+            return rendered
+    except Exception as exc:
+        logger.warning("Structured profile unavailable, using profile.txt: %s", exc)
     path = Path(config["profile_file"])
     if not path.is_file():
         logger.debug("No profile file at %s; emails will not include your personal info.", path)
@@ -329,6 +335,35 @@ def strip_trailing_contact_block(body: str) -> str:
     return "\n".join(lines).rstrip()
 
 
+def _ollama_body(
+    url: str,
+    prompt: str,
+    company: str,
+    role: str,
+    name: str,
+    config: dict,
+    logger: logging.Logger,
+    ollama_state: dict | None,
+) -> str | None:
+    payload = {"model": config["ollama_model"], "prompt": prompt, "stream": False}
+    try:
+        resp = requests.post(url, json=payload, timeout=120)
+        resp.raise_for_status()
+        data = resp.json()
+        body = (data.get("response") or "").strip()[:BODY_MAX_CHARS]
+        if body:
+            return body
+        if ollama_state is not None and not ollama_state.get("empty_body_warned"):
+            logger.warning("Ollama returned an empty body; using template email body.")
+            ollama_state["empty_body_warned"] = True
+        return build_fallback_application_body(company, role, name, max_chars=BODY_MAX_CHARS)
+    except requests.RequestException as e:
+        if ollama_state is not None and not ollama_state.get("ollama_unreachable_warned"):
+            logger.warning("Ollama request failed (%s); using template email body.", e)
+            ollama_state["ollama_unreachable_warned"] = True
+        return build_fallback_application_body(company, role, name, max_chars=BODY_MAX_CHARS)
+
+
 def generate_body(
     company: str,
     role: str,
@@ -343,6 +378,11 @@ def generate_body(
     url = f"{config['ollama_base_url']}/api/generate"
     role_clean = _normalize_cell(role)
     company_clean = _normalize_cell(company)
+    if is_cold_email(role_clean):
+        logger.info("Cold email for %s (no role). Writing as an AI Full Stack Developer.", company_clean or "unnamed company")
+        prompt = cold_prompt(company_clean, profile_text)
+        return _ollama_body(url, prompt, company, role, "", config, logger, ollama_state)
+
     has_jd = bool((job_description or "").strip())
     has_key_skills = bool((key_skills or "").strip())
     has_why_match = bool((why_match or "").strip())
@@ -403,23 +443,7 @@ Use this candidate profile to personalize the email:
 Candidate profile:
 {profile_text}"""
 
-    payload = {"model": config["ollama_model"], "prompt": prompt, "stream": False}
-    try:
-        resp = requests.post(url, json=payload, timeout=120)
-        resp.raise_for_status()
-        data = resp.json()
-        body = (data.get("response") or "").strip()[:BODY_MAX_CHARS]
-        if body:
-            return body
-        if ollama_state is not None and not ollama_state.get("empty_body_warned"):
-            logger.warning("Ollama returned an empty body; using template email body.")
-            ollama_state["empty_body_warned"] = True
-        return build_fallback_application_body(company, role, "", max_chars=BODY_MAX_CHARS)
-    except requests.RequestException as e:
-        if ollama_state is not None and not ollama_state.get("ollama_unreachable_warned"):
-            logger.warning("Ollama request failed (%s); using template email body.", e)
-            ollama_state["ollama_unreachable_warned"] = True
-        return build_fallback_application_body(company, role, "", max_chars=BODY_MAX_CHARS)
+    return _ollama_body(url, prompt, company, role, "", config, logger, ollama_state)
 
 
 def build_and_send(
@@ -485,8 +509,7 @@ def main() -> None:
         config["ollama_base_url"],
     )
 
-    resumes_base = Path(config["resumes_base"])
-    region_dir = resumes_base / region
+    region_dir = region_resume_dir(config["resumes_base"], region)
     if not region_dir.is_dir():
         sys.exit(f"Resumes region directory not found: {region_dir}")
 

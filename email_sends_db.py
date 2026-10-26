@@ -204,3 +204,179 @@ def log_email_send(
             conn.commit()
     except sqlite3.Error as e:
         logger.warning("email_sends_db: failed to log send: %s", e)
+
+
+def _union_select() -> str:
+    parts = [
+        f"""
+        SELECT id, created_at, recipient_email, success, dry_run,
+               company, role, region, subject, pdf_path, pdf_filename,
+               excel_path, failure_reason, '{table}' AS source
+        FROM {table}
+        """
+        for table in ALLOWED_TABLES
+    ]
+    return " UNION ALL ".join(parts)
+
+
+def _row_to_dict(row: sqlite3.Row) -> dict:
+    return {k: row[k] for k in row.keys()}
+
+
+def fetch_stats(*, db_path: Path | str | None = None) -> dict:
+    """Aggregate counts across all send tables."""
+    empty = {
+        "total_attempts": 0,
+        "sent": 0,
+        "failed": 0,
+        "dry_runs": 0,
+        "skipped_dedup": 0,
+        "today_sent": 0,
+        "by_region": {},
+        "by_source": {},
+    }
+    p = Path(db_path) if db_path is not None else get_db_path()
+    if not p.is_file():
+        return empty
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    union = _union_select()
+    try:
+        with sqlite3.connect(p, timeout=30) as conn:
+            conn.row_factory = sqlite3.Row
+            totals = conn.execute(
+                f"""
+                SELECT
+                  COUNT(*) AS total_attempts,
+                  SUM(CASE WHEN success = 1 AND dry_run = 0 THEN 1 ELSE 0 END) AS sent,
+                  SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) AS failed,
+                  SUM(CASE WHEN dry_run = 1 THEN 1 ELSE 0 END) AS dry_runs,
+                  SUM(CASE WHEN failure_reason LIKE 'duplicate_same_job_email%' THEN 1 ELSE 0 END) AS skipped_dedup,
+                  SUM(CASE WHEN success = 1 AND dry_run = 0 AND created_at >= ? THEN 1 ELSE 0 END) AS today_sent
+                FROM ({union})
+                """,
+                (today_start,),
+            ).fetchone()
+            regions = conn.execute(
+                f"""
+                SELECT COALESCE(region, 'UNKNOWN') AS region,
+                       SUM(CASE WHEN success = 1 AND dry_run = 0 THEN 1 ELSE 0 END) AS sent
+                FROM ({union})
+                GROUP BY COALESCE(region, 'UNKNOWN')
+                """
+            ).fetchall()
+            sources = conn.execute(
+                f"""
+                SELECT source,
+                       COUNT(*) AS attempts,
+                       SUM(CASE WHEN success = 1 AND dry_run = 0 THEN 1 ELSE 0 END) AS sent
+                FROM ({union})
+                GROUP BY source
+                """
+            ).fetchall()
+    except sqlite3.Error as e:
+        logger.warning("email_sends_db: stats query failed: %s", e)
+        return empty
+    return {
+        "total_attempts": int(totals["total_attempts"] or 0),
+        "sent": int(totals["sent"] or 0),
+        "failed": int(totals["failed"] or 0),
+        "dry_runs": int(totals["dry_runs"] or 0),
+        "skipped_dedup": int(totals["skipped_dedup"] or 0),
+        "today_sent": int(totals["today_sent"] or 0),
+        "by_region": {r["region"]: int(r["sent"] or 0) for r in regions},
+        "by_source": {
+            r["source"]: {"attempts": int(r["attempts"] or 0), "sent": int(r["sent"] or 0)} for r in sources
+        },
+    }
+
+
+def _sends_filters(
+    *,
+    q: str | None,
+    success: int | None,
+    region: str | None,
+    dry_run: int | None,
+    source: str | None,
+) -> tuple[str, list]:
+    clauses: list[str] = ["1=1"]
+    params: list = []
+    if q:
+        like = f"%{q.strip()}%"
+        clauses.append(
+            "(recipient_email LIKE ? OR IFNULL(company,'') LIKE ? OR IFNULL(role,'') LIKE ? OR IFNULL(subject,'') LIKE ?)"
+        )
+        params.extend([like, like, like, like])
+    if success is not None:
+        clauses.append("success = ?")
+        params.append(success)
+    if region:
+        clauses.append("UPPER(IFNULL(region,'')) = ?")
+        params.append(region.strip().upper())
+    if dry_run is not None:
+        clauses.append("dry_run = ?")
+        params.append(dry_run)
+    if source:
+        if source not in ALLOWED_TABLES:
+            raise ValueError(f"Unknown source table: {source}")
+        clauses.append("source = ?")
+        params.append(source)
+    return " AND ".join(clauses), params
+
+
+def count_sends(
+    *,
+    q: str | None = None,
+    success: int | None = None,
+    region: str | None = None,
+    dry_run: int | None = None,
+    source: str | None = None,
+    db_path: Path | str | None = None,
+) -> int:
+    p = Path(db_path) if db_path is not None else get_db_path()
+    if not p.is_file():
+        return 0
+    where, params = _sends_filters(q=q, success=success, region=region, dry_run=dry_run, source=source)
+    union = _union_select()
+    try:
+        with sqlite3.connect(p, timeout=30) as conn:
+            row = conn.execute(f"SELECT COUNT(*) FROM ({union}) WHERE {where}", params).fetchone()
+            return int(row[0] if row else 0)
+    except sqlite3.Error as e:
+        logger.warning("email_sends_db: count query failed: %s", e)
+        return 0
+
+
+def list_sends(
+    *,
+    q: str | None = None,
+    success: int | None = None,
+    region: str | None = None,
+    dry_run: int | None = None,
+    source: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    db_path: Path | str | None = None,
+) -> list[dict]:
+    p = Path(db_path) if db_path is not None else get_db_path()
+    if not p.is_file():
+        return []
+    where, params = _sends_filters(q=q, success=success, region=region, dry_run=dry_run, source=source)
+    union = _union_select()
+    limit = max(1, min(int(limit), 200))
+    offset = max(0, int(offset))
+    try:
+        with sqlite3.connect(p, timeout=30) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                f"""
+                SELECT * FROM ({union})
+                WHERE {where}
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                [*params, limit, offset],
+            ).fetchall()
+            return [_row_to_dict(r) for r in rows]
+    except sqlite3.Error as e:
+        logger.warning("email_sends_db: list query failed: %s", e)
+        return []

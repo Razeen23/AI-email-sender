@@ -1,0 +1,183 @@
+{
+  "identity": {
+    "name": "RAZEEN H",
+    "headline": "AI Full Stack Developer",
+    "email": "razeen.official23@gmail.com",
+    "phones": {
+      "india": "+91 9345035514",
+      "uae": "+971 50 769 7208"
+    },
+    "location": {
+      "inr": "Chennai, India",
+      "uae": ""
+    },
+    "links": {
+      "linkedin": "https://linkedin.com/in/razeen-developer",
+      "github": "https://github.com/Razeen23",
+      "portfolio": "https://razeen-portfolio.vercel.app"
+    },
+    "languages": [
+      "English (Fluent)",
+      "Tamil (Native)",
+      "Hindi"
+    ]
+  },
+  "summaries": {
+    "inr": "Full Stack Developer with 3+ years shipping SaaS products and the AI inside them: a support assistant (React, FastAPI, RAG), PHP hosting portals and a reseller panel, and a Kubernetes path where AI writes Dockerfiles and diagnoses failed releases.",
+    "uae": "AI Full Stack Developer with 3+ years of experience building SaaS products and AI-powered applications. Skilled in React, TypeScript, Python, FastAPI, and RAG-based systems using LLMs, LangChain, and vector databases. Experienced in developing intelligent AI assistants, scalable APIs, cloud hosting platforms, and Kubernetes-based deployment workflows with AI-powered Dockerfile generation and deployment troubleshooting."
+  },
+  "skills": [
+    {
+      "id": "9a90169a761f",
+      "group": "AI application",
+      "items": "Retrieval-Augmented Generation (RAG), LangChain, FAISS, FastAPI, Python, OpenAI API, Google Gemini API, Dockerfile generation, deploy error diagnosis, Ollama"
+    },
+    {
+      "id": "d3b0c253b452",
+      "group": "Frontend",
+      "items": "JavaScript, AJAX, HTML5, CSS3, D3.js, React.js, TypeScript, Tailwind CSS, Vite"
+    },
+    {
+      "id": "2e5ac20f73ec",
+      "group": "Backend",
+      "items": "PHP, Node.js, Express.js, Fastify, FastAPI, Python, RESTful APIs, Authentication and Authorization"
+    },
+    {
+      "id": "1910a3d2ef5d",
+      "group": "Databases",
+      "items": "MySQL, PostgreSQL, MongoDB, Firebase, SQLite"
+    },
+    {
+      "id": "d2e7dfece411",
+      "group": "Delivery",
+      "items": "Docker, Kubernetes, Helm, GitHub Actions, Git, GitHub, Linux"
+    }
+  ],
+  "experience": [
+    {
+      "id": "c048643193bd",
+      "title": "Full Stack Developer",
+      "company": "Hostzop Cloud Technologies Pvt. Ltd.",
+      "dates": "Aug 2023 - Present",
+      "location": "Chennai, India",
+      "bullets": [
+        "Built an AI support assistant so customers ask hosting questions in the product, using FastAPI, React, and internal docs.",
+        "Built hosting dashboards and APIs in PHP, JavaScript, AJAX, MySQL, and D3.js for 5,000+ users.",
+        "Stripe and Razorpay verify a payment and turn the service on immediately.",
+        "Built a Git-to-live Kubernetes path. AI writes the Dockerfile from the detected stack and diagnoses a failed deploy.",
+        "GitHub Actions cut release time by 5x and deployment issues by 90%."
+      ]
+    },
+    {
+      "id": "da4eb2259d24",
+      "title": "Full Stack Developer Intern",
+      "company": "Aspire Systems",
+      "dates": "Apr 2023 - Jul 2023",
+      "location": "",
+      "bullets": [
+        "Engineered a real-time face recognition attendance system using Python, OpenCV, cvzone, and NumPy.",
+        "Serialized a facial-matching model with Pickle and sent recognized attendance records to Firebase."
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "id": "955ad32119e3",
+      "name": "AI Support Assistant (RAG)",
+      "tech": "Python, FastAPI, React, LangChain, FAISS, MySQL, OpenAI API, Google Gemini API",
+      "bullets": [
+        "Customers ask a server question in the product instead of opening a ticket first.",
+        "LangChain and FAISS pull the matching internal docs. OpenAI or Gemini answer only from that text.",
+        "FastAPI serves the reply. React is the screen inside the hosting account.",
+        "Common setup steps run on their own. If the assistant cannot fix the issue, it opens a ticket."
+      ]
+    },
+    {
+      "id": "e4859d861c8f",
+      "name": "Hostzop Kubernetes PaaS (Git to Live URL)",
+      "tech": "React, TypeScript, Fastify, PostgreSQL, Docker, Kubernetes, Helm, Harbor",
+      "bullets": [
+        "Takes a GitHub repo or ZIP and publishes it: stack detect, image build, Harbor, Helm, TLS, and DNS.",
+        "AI writes the Dockerfile from the detected stack, so the customer does not write the container file.",
+        "AI reads a failed build or deploy log and returns the cause, not only the raw log.",
+        "Trivy scans the image, Helm installs it in its own namespace, and the same API adds a domain, a database, and WordPress."
+      ]
+    },
+    {
+      "id": "9d7db05f7d4f",
+      "name": "Hostzop SaaS Ecosystem (Client and Reseller Platforms)",
+      "tech": "PHP, JavaScript, AJAX, MySQL, D3.js, REST APIs",
+      "bullets": [
+        "White-label portals in PHP, JavaScript, AJAX, and MySQL, used by 1,000+ users. Dashboards serve 5,000+ active users.",
+        "A reseller attaches their own domain and branding and sells hosting under their name.",
+        "D3.js shows billing, usage, and server metrics. AJAX loads those numbers from the APIs without a full page reload.",
+        "Stripe and Razorpay confirm the payment and activate the service, so nobody turns the order on by hand."
+      ]
+    },
+    {
+      "id": "d152d1df6fd4",
+      "name": "Reseller Cloud Management Platform",
+      "tech": "PHP, JavaScript, AJAX, MySQL, REST APIs",
+      "bullets": [
+        "A customer buys VMs, manages them, and resells them. Built in PHP, JavaScript, AJAX, and MySQL.",
+        "Credits, monthly plans, and usage sit on one account, so the reseller sees sales and cost together.",
+        "Admin and reseller views show profit, usage, and clients, with separate logins.",
+        "The purchase runs VM provisioning, which cut setup from 40 minutes to 5 minutes."
+      ]
+    },
+    {
+      "id": "14632adc6cb5",
+      "name": "E-Invoicing Automation",
+      "tech": "PHP, MasterGST API, MySQL",
+      "bullets": [
+        "MasterGST creates the GST invoice from the same order the billing system already recorded.",
+        "GSTIN and invoice fields are checked before the invoice is filed.",
+        "Removed 9+ hours of retyping each week, and filing errors on this flow went to zero."
+      ]
+    },
+    {
+      "id": "136da683f8ec",
+      "name": "Spotcard - Digital Invitation Platform",
+      "tech": "React.js, Node.js, Vite",
+      "bullets": [
+        "Mobile-first invitation link for an event, instead of a paper card or a static image.",
+        "APIs store the host profile, media, and event details.",
+        "The guest page has a map, a schedule, a calendar add, and a media gallery."
+      ]
+    },
+    {
+      "id": "8a149f6c164b",
+      "name": "AI Email Sender",
+      "tech": "Python, Ollama, SMTP, SQLite, Pandas",
+      "bullets": [
+        "Ollama writes a separate email for each spreadsheet row from that lead's data, not one copied template.",
+        "The prompt can add a role line and an India or UAE resume when the row asks for it.",
+        "SQLite blocks a second send to the same address. SMTP sends with a rate limit."
+      ]
+    }
+  ],
+  "education": [
+    {
+      "id": "17e14538bbea",
+      "degree": "Bachelor of Computer Applications (BCA)",
+      "dates": "2019 - 2022",
+      "school": "Mohamed Sathak College of Arts and Science, Chennai"
+    },
+    {
+      "id": "649c60ed6a74",
+      "degree": "Diploma in Counseling Psychology (Online)",
+      "dates": "2020 - 2021",
+      "school": "Sypa IIE"
+    }
+  ],
+  "certifications": [
+    "Full Stack Development - Offline Training",
+    "Back-end Development - Meta",
+    "JavaScript - Udemy",
+    "Fundamentals of Cybersecurity - upGrad"
+  ],
+  "awards": [
+    "Best Performer Award during the Aspire Systems internship for technical contribution and reliability."
+  ],
+  "email_rules": "EMAIL STYLE RULES (FOR EMAIL GENERATION ONLY)\n\nTone: professional, confident, concise\n\nEmail structure (follow this order):\n1. Greeting\n2. About me and the role I am applying for (if role is mentioned)\n3. About my achievements and experience\n4. How I can add value in their company\n\nWhen role and company are known:\n• Always include: company name, role name, one relevant experience\n• Opening: tailor to the role (e.g. reference the role or type of work)—avoid generic openings\n• Avoid long paragraphs\n\nWhen the role is missing, this is a cold email, not an application:\n• Write as an AI Full Stack Developer\n• Say you are interested in the company and willing to work with them even if they have no opening\n• Use 1–2 real achievements. Do not invent a job title\n• Ask them to consider the attached AI Full Stack resume now or later\n\nWhen the company name is missing but a role is known:\n• Keep it an application and say \"your team\" instead of a company name\n\nTarget length: 140–190 words\n\nSignature (added automatically—do not include in body):\nBest regards,\n\nRazeen H\nrazeen.official23@gmail.com\n+971 50 769 7208\nhttps://razeen-portfolio.vercel.app"
+}

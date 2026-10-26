@@ -13,6 +13,7 @@ from pathlib import Path
 
 import requests
 
+from cold_email import cold_prompt, cold_subject, is_cold_email
 from fallback_email_body import build_fallback_application_body
 
 from email_sends_db import (
@@ -92,6 +93,14 @@ def get_config() -> dict | None:
 
 
 def load_profile(profile_file: str) -> str | None:
+    try:
+        from backend.services.profile_service import email_profile_or_none
+
+        rendered = email_profile_or_none()
+        if rendered:
+            return rendered
+    except Exception:
+        pass
     path = Path(profile_file)
     if not path.is_file():
         return None
@@ -115,9 +124,9 @@ def parse_signature_from_profile(profile_text: str | None) -> dict:
             sig["email"] = line.split(":", 1)[1].strip()
         elif lower.startswith("phone") and ":" in line:
             sig["phone"] = line.split(":", 1)[1].strip()
-        elif "portfolio" in lower or "portfilio" in lower:
-            if ":" in line:
-                sig["portfolio"] = line.split(":", 1)[1].strip()
+        elif re.match(r"^(portfolio|portfilio)\s*:", lower):
+            match = re.search(r"https?://\S+", line)
+            sig["portfolio"] = match.group(0).rstrip(".,)") if match else line.split(":", 1)[1].strip()
     return sig
 
 
@@ -147,9 +156,25 @@ def generate_body(
     ollama_state: dict | None = None,
 ) -> str | None:
     url = f"{config['ollama_base_url']}/api/generate"
-    is_cold_email = not (role or "").strip()
+    cold = is_cold_email(role)
     is_anonymous_company = not (company or "").strip()
     has_jd = bool((job_description or "").strip())
+    if cold:
+        logger.info("Cold email for %s (no role). Writing as an AI Full Stack Developer.", company or "unnamed company")
+        prompt = cold_prompt(company, profile_text)
+        if name and str(name).strip():
+            prompt += f"\n- You may mention that you were referred by {name} if it fits naturally."
+        payload = {"model": config["ollama_model"], "prompt": prompt, "stream": False}
+        try:
+            resp = requests.post(url, json=payload, timeout=120)
+            resp.raise_for_status()
+            data = resp.json()
+            body = strip_leading_subject_line((data.get("response") or "").strip())[:BODY_MAX_CHARS]
+            if body:
+                return body
+        except requests.RequestException as e:
+            logger.warning("Ollama request failed (%s); using template email body.", e)
+        return build_fallback_application_body(company, role, name, max_chars=BODY_MAX_CHARS)
 
     if is_anonymous_company:
         prompt = """Write a short, professional job application email body (2-4 sentences only).
@@ -157,12 +182,7 @@ def generate_body(
     else:
         prompt = f"""Write a short, professional job application email body (2-4 sentences only).
 - Addressed to the hiring team at {company}."""
-    if is_cold_email:
-        prompt += """
-- This is a cold email (no specific role in the listing). Write as someone exploring opportunities, interested in the company, and open to relevant roles. Do not mention a specific job title.
-- Professional tone, not robotic. Do not write "Subject:" or any email header—the subject is set separately; start with the greeting. End with a sign-off like "Best regards". Do not include placeholders like [Your Name]. Keep it concise."""
-    else:
-        prompt += f"""
+    prompt += f"""
 - Mention the company name and the role "{role}" naturally.
 - Professional tone, not robotic. Do not write "Subject:" or any email header—the subject is set separately; start with the greeting. End with a sign-off like "Best regards". Do not include placeholders like [Your Name]. Keep it concise."""
     if name and str(name).strip():
@@ -178,13 +198,9 @@ CRITICAL: Write the email based only on what in the candidate profile actually m
 
     if profile_text:
         role_instruction = (
-            "This is a cold email (no specific role/JD): include all project details and key experience from the candidate profile so the recipient gets a full picture. You may use a few short paragraphs. Stay professional and concise."
-            if is_cold_email and not has_jd
-            else (
-                'Use the job description above: mention only 1–2 items from the candidate profile that actually match the JD. Do not list everything; do not claim non-matching skills.'
-                if has_jd
-                else f'Based on the role "{role}", choose what to include: only 1–2 items that match (e.g. one relevant work experience OR one relevant project; for frontend highlight frontend work, for full-stack highlight full-stack, etc.). Do not list everything.'
-            )
+            'Use the job description above: mention only 1–2 items from the candidate profile that actually match the JD. Do not list everything; do not claim non-matching skills.'
+            if has_jd
+            else f'Based on the role "{role}", choose what to include: only 1–2 items that match (e.g. one relevant work experience OR one relevant project; for frontend highlight frontend work, for full-stack highlight full-stack, etc.). Do not list everything.'
         )
         prompt += f"""
 
@@ -214,12 +230,9 @@ Candidate profile:
 
 
 def _subject_for_send(company: str, role: str) -> str:
-    has_role = (role or "").strip()
     has_company = (company or "").strip()
-    if not has_role and not has_company:
-        return "Reaching out"
-    if not has_role:
-        return f"Reaching out – {company}"
+    if is_cold_email(role):
+        return cold_subject(has_company)
     if not has_company:
         return f"Application for {role}"
     return f"Application for {role} at {company}"

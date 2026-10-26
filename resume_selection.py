@@ -1,7 +1,5 @@
 """
-Pick resumes/INR|UAE/<folder> PDF by role. Gen-AI CV is used when role OR job description
-(or key skills / why match for send_emails2) mention AI-related terms—so a generic title
-like "Software Engineer" still gets gen-ai if the JD is about LLM/RAG/etc.
+Pick a PDF from resumes/INR-CV's or resumes/UAE-CV's by role (and JD/skills for Gen-AI).
 """
 
 from __future__ import annotations
@@ -10,15 +8,23 @@ import logging
 import re
 from pathlib import Path
 
-# Non-AI: match Role column only (JD may mention "React" without meaning react-js resume).
-ROLE_TO_FOLDER = [
-    (re.compile(r"frontend|front\s*end", re.I), "front-end"),
-    (re.compile(r"full\s*stack|fullstack", re.I), "full-stack"),
-    (re.compile(r"react\s*js|react", re.I), "react-js"),
-]
-DEFAULT_FOLDER = "full-stack"
+REGION_FOLDERS = {
+    "INR": "INR-CV's",
+    "UAE": "UAE-CV's",
+}
 
-# Combined text (role + JD + optional columns): if any matches, attach gen-ai PDF.
+ROLE_TO_STEM = [
+    (re.compile(r"front[\s-]*end|frontend", re.I), "Front-End-Developer"),
+    (re.compile(r"react", re.I), "React-JS-Developer"),
+    (re.compile(r"backend|back[\s-]*end", re.I), "Backend-Developer"),
+    (re.compile(r"devops|dev[\s-]*ops|\bsre\b", re.I), "DevOps-Engineer"),
+    (re.compile(r"platform", re.I), "Platform-Engineer"),
+    (re.compile(r"integration", re.I), "Integration-Engineer"),
+    (re.compile(r"saas|product\s*engineer", re.I), "SaaS-Product-Engineer"),
+    (re.compile(r"full[\s-]*stack|fullstack", re.I), "AI-Full-Stack-Developer"),
+]
+DEFAULT_STEM = "AI-Full-Stack-Developer"
+
 GEN_AI_RESUME_PATTERN = re.compile(
     r"""
     \bgenai\b
@@ -46,6 +52,11 @@ GEN_AI_RESUME_PATTERN = re.compile(
 )
 
 
+def region_resume_dir(resumes_base: str | Path, region: str) -> Path:
+    key = (region or "").strip().upper()
+    return Path(resumes_base) / REGION_FOLDERS.get(key, REGION_FOLDERS["INR"])
+
+
 def _combined_context(
     role: str | None,
     job_description: str | None = None,
@@ -68,6 +79,45 @@ def should_use_gen_ai_resume(
     return bool(GEN_AI_RESUME_PATTERN.search(text))
 
 
+def _compact(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (text or "").lower())
+
+
+def role_to_resume_stem(
+    role: str,
+    *,
+    job_description: str | None = None,
+    key_skills: str | None = None,
+    why_match: str | None = None,
+) -> str:
+    r = (role or "").strip()
+    if not r or r.lower() == "nan":
+        return DEFAULT_STEM
+    if should_use_gen_ai_resume(role, job_description, key_skills, why_match):
+        return "Generative-AI-Engineer"
+    for pattern, stem in ROLE_TO_STEM:
+        if pattern.search(r):
+            return stem
+    return DEFAULT_STEM
+
+
+def _iter_pdfs(dir_path: Path) -> list[Path]:
+    if not dir_path.is_dir():
+        return []
+    return sorted(
+        [f for f in dir_path.iterdir() if f.suffix.lower() == ".pdf" and not f.name.startswith("~$") and ".." not in f.name],
+        key=lambda p: p.name,
+    )
+
+
+def _find_pdf_by_stem(dir_path: Path, stem: str) -> Path | None:
+    needle = _compact(stem)
+    for pdf in _iter_pdfs(dir_path):
+        if needle and needle in _compact(pdf.stem):
+            return pdf
+    return None
+
+
 def role_to_resume_subdir(
     role: str,
     region: str,
@@ -76,15 +126,9 @@ def role_to_resume_subdir(
     key_skills: str | None = None,
     why_match: str | None = None,
 ) -> str:
-    """Folder name under resumes/INR or resumes/UAE (actual disk layout)."""
-    reg = (region or "").strip().upper()
-    if should_use_gen_ai_resume(role, job_description, key_skills, why_match):
-        return "gen-ai-uae" if reg == "UAE" else "gen-ai"
-    r = (role or "").strip().lower()
-    for pattern, folder in ROLE_TO_FOLDER:
-        if pattern.search(r):
-            return f"{folder}-{reg.lower()}"
-    return f"{DEFAULT_FOLDER}-{reg.lower()}"
+    """Region folder name on disk (kept for callers that still expect a subdir)."""
+    key = (region or "").strip().upper()
+    return REGION_FOLDERS.get(key, REGION_FOLDERS["INR"])
 
 
 def get_resume_path(
@@ -97,39 +141,27 @@ def get_resume_path(
     key_skills: str | None = None,
     why_match: str | None = None,
 ) -> str | None:
-    """Pick resume from resumes/INR or resumes/UAE. Do not use generated/."""
-    folder_name = role_to_resume_subdir(
+    """Pick a stock PDF from resumes/INR-CV's or resumes/UAE-CV's. Do not use generated/."""
+    dir_path = region_resume_dir(resumes_base, region)
+    stem = role_to_resume_stem(
         role,
-        region,
         job_description=job_description,
         key_skills=key_skills,
         why_match=why_match,
     )
-    dir_path = Path(resumes_base) / region / folder_name
-    if not dir_path.is_dir():
-        default_resume = (
-            Path(resumes_base) / "INR" / "full-stack-inr" / "Full-stack-developer-CV-Razeen.pdf"
-            if region == "INR"
-            else Path(resumes_base) / "UAE" / "full-stack-uae" / "Full-stack-developer-CV-Razeen.pdf"
-        )
-        if default_resume.is_file():
-            logger.warning("Resume directory not found: %s. Falling back to %s", dir_path, default_resume)
-            return str(default_resume)
-        logger.error("Resume directory not found: %s (and default resume missing at %s)", dir_path, default_resume)
-        return None
-    pdfs = sorted(
-        [f for f in dir_path.iterdir() if f.suffix.lower() == ".pdf" and ".." not in f.name],
-        key=lambda p: p.name,
-    )
-    if not pdfs:
-        default_resume = (
-            Path(resumes_base) / "INR" / "full-stack-inr" / "Full-stack-developer-CV-Razeen.pdf"
-            if region == "INR"
-            else Path(resumes_base) / "UAE" / "full-stack-uae" / "Full-stack-developer-CV-Razeen.pdf"
-        )
-        if default_resume.is_file():
-            logger.warning("No PDF found in %s. Falling back to %s", dir_path, default_resume)
-            return str(default_resume)
-        logger.error("No PDF found in %s (and default resume missing at %s)", dir_path, default_resume)
-        return None
-    return str(pdfs[0])
+    chosen = _find_pdf_by_stem(dir_path, stem)
+    if chosen:
+        return str(chosen)
+
+    fallback = _find_pdf_by_stem(dir_path, DEFAULT_STEM)
+    if fallback:
+        logger.warning("No %s resume in %s. Falling back to %s", stem, dir_path, fallback.name)
+        return str(fallback)
+
+    pdfs = _iter_pdfs(dir_path)
+    if pdfs:
+        logger.warning("No matching resume in %s. Falling back to %s", dir_path, pdfs[0].name)
+        return str(pdfs[0])
+
+    logger.error("Resume directory empty or missing: %s", dir_path)
+    return None

@@ -12,12 +12,15 @@ import os
 import re
 import sys
 import time
+from difflib import SequenceMatcher
 from pathlib import Path
 
 import pandas as pd
 import requests
 
+from cold_email import ensure_role_column, is_cold_email
 from email_sends_db import TABLE_GENERATE_RESUME
+from resume_selection import region_resume_dir
 from send_generated_resume_email import send_email_for_row
 
 
@@ -45,17 +48,15 @@ OPTIONAL_ENV = {
     "OLLAMA_MODEL": "llama3.2",
 }
 
-# Exact section order for prompt (must match format spec below)
+# Section order for a generated resume. Header, education, and the closing sections are added in code.
 RESUME_SECTIONS = [
-    "NAME, ROLE",
-    "Contact line (Email | Phone | LinkedIn | Portfolio | GitHub)",
     "PROFESSIONAL SUMMARY",
+    "SKILLS",
     "WORK EXPERIENCE",
+    "PROJECTS",
     "EDUCATION",
     "CERTIFICATIONS",
-    "AWARDS & ACHIEVEMENTS",
-    "SKILLS",
-    "PROJECTS",
+    "AWARDS",
     "LANGUAGES",
 ]
 
@@ -121,11 +122,11 @@ def load_excel(excel_path: str, logger: logging.Logger) -> pd.DataFrame:
     if not os.path.isfile(excel_path):
         sys.exit(f"Excel file not found: {excel_path}")
     df = pd.read_excel(excel_path, engine="openpyxl")
-    df = normalize_columns(df)
-    required = {"Company", "Role", "Email"}
+    df = ensure_role_column(normalize_columns(df))
+    required = {"Company", "Email"}
     missing = required - set(df.columns)
     if missing:
-        sys.exit(f"Excel missing columns (after mapping): {missing}. Need company name, role, and HR email.")
+        sys.exit(f"Excel missing columns (after mapping): {missing}. Need company name and HR email. Role is optional.")
     return df
 
 
@@ -139,98 +140,53 @@ def load_profile(profile_file: str) -> str | None:
 
 
 RESUME_FORMAT_SPEC = """
-OUTPUT FORMAT (STRICT — follow this EXACT order). Use heading hierarchy for ATS and scannability:
-• ## for main section titles (WORK EXPERIENCE, EDUCATION, PROJECTS, SKILLS, etc.)
-• ### for sub-topics (each company name, each project name)
-• #### or ##### for sub-items where needed
+Write the resume in Markdown. Start at ## Professional Summary. Do not output the name, headline, or contact line.
 
-**NAME** (ALL CAPS)
-**ROLE** (ALL CAPS) — must be the TARGET role they are applying for (e.g. Frontend Developer), NOT their current job title.
+Section order:
+## Professional Summary
+## Skills
+## Work Experience
+## Projects
 
-CONTACT LINE — display the actual email and phone as the visible link text (e.g. razeen.official23@gmail.com | India: +91 9345035514), NOT the words "Email" or "Phone". Keep Markdown links so they stay clickable: [actual@email.com](mailto:...) | [India: +91 9345035514](tel:...) | [LinkedIn](url) | [Portfolio](url) | [GitHub](url). Omit any not in profile.
+Do not output Education, Certifications, Awards, or Languages. Those are copied from the profile after you finish.
 
----
+Summary:
+- Two or three short sentences in the same voice as SUMMARY TO ADAPT.
+- Mention the target role once.
+- Do not turn it into a keyword list.
 
-## PROFESSIONAL SUMMARY
-(Short paragraph — max 4 lines. Use keywords from JD and profile for ATS.)
+Skills:
+- Use only the saved groups and tools. Do not add a tool from the job description.
+- Put the group that best matches the job first.
+- One line per group, in this form: **Group:** tool, tool, tool
 
----
+Work experience:
+- Keep every saved job.
+- Copy the title, company, and dates exactly, in this form:
+  ### Title, Company | Dates
+- If a location is listed on that job, put it on the next line.
+- Use the saved bullets only. You may reorder them and lightly rephrase.
+- Do not add a bullet, a tool, or a number that is not already in that job's bullets.
+- A job with two saved bullets stays at two bullets. Do not stretch it.
+- A longer job stays at five bullets or fewer. Put the most relevant bullets first.
+- One idea per bullet. Vary how the lines open. Keep the plain voice of the saved bullets.
+- Do not write "responsible for", "worked on", "leveraged", "spearheaded", or "passionate".
 
-## WORK EXPERIENCE
+Projects:
+- Choose four or five saved projects that fit this role. Put the strongest fit first.
+- Do not invent a project and do not rename one.
+- Use this form:
+  ### Project Name
+  *Tech line copied exactly*
+  - three or four bullets
+- Do not repeat a sentence already used under Work Experience.
 
-### Company Name – Role | Date | Location
-
-WORK EXPERIENCE RULES (STRICT):
-• Each role MUST contain 5–7 bullet points
-• Each bullet must describe ONE clear achievement
-• Include tools + action + impact
-• Prefer measurable results where possible
-• Avoid vague bullets like "worked on" or "responsible for"
-
-Bullet formula: Action verb + Tech used + What built + Impact
-
-Example: Built RESTful APIs using Node.js + Express that automated provisioning workflows, reducing deployment time from 40 minutes to 5 minutes.
-
-Prioritize production engineering work over basic development tasks (e.g. automation reduction, CI/CD, Slack integrations, production infra).
-
----
-
-## EDUCATION
-
-### Degree – College | Year
-
----
-
-## CERTIFICATIONS
-(short list)
-
----
-
-## AWARDS & ACHIEVEMENTS
-(short list)
-
----
-
-## SKILLS
-
-Group exactly like:
-- Frontend
-- Backend
-- Databases
-- Integrations
-- DevOps & Tools
-- Performance & State
-
----
-
-## PROJECTS
-
-PROJECT RULES (MANDATORY):
-• Include at least 4 projects—mandatory. Prefer 5–6 when the profile has them.
-• Order projects from least relevant to most relevant for the target role/JD (so recruiters see both breadth and best fit).
-• Choose from profile projects: Hostzop SaaS Ecosystem, Reseller Cloud Platform, E-Invoicing Automation, SpotCard/Spotcard, CI/CD & Deployment Automation, AI-Powered Support Automation, etc.
-• Each project: use ### Project Name; add a tech stack line (e.g. "Tech: Python, FastAPI, LangChain") where relevant; then exactly 5 bullets, written briefly.
-• Keep each bullet short; focus on architecture, automation, and measurable outcomes—not just feature lists.
-
-### Project Name
-(Tech: ... optional line when relevant)
-• 5 bullets, brief: scope, your role, tech stack, impact
-
----
-
-## LANGUAGES
-
-MANDATORY: Always include LANGUAGES section with the candidate's languages from profile (e.g. English (Fluent), Tamil (Native), Hindi). Do not omit this section.
-
----
-
-TWO-PAGE RULE: Target 900–1100 words total. Use keywords from the job description and profile for ATS compatibility. Keep structure clean and scannable. Prioritize relevant experience; shorten bullets if needed; keep strong impact bullets.
+Stay close to the saved length. Do not pad. Output only the Markdown resume.
 """
 
 
 def build_resume_prompt(profile_text: str, role: str, company: str, jd_text: str) -> str:
-    prompt = f"""You are writing a resume in Markdown. Use ONLY the information from the candidate profile below. Do NOT invent any experience, skills, education, projects, or certifications. Adapt content to the job role and JD; do not change facts. Rewrite bullets for relevance. Output ONLY clean Markdown for the resume — no commentary, no explanations.
-{RESUME_FORMAT_SPEC}
+    return f"""You are editing a resume a person already wrote. Select, reorder, and lightly rephrase only. Do not invent experience, skills, projects, education, dates, or numbers.
 
 Target role: {role}
 Company: {company}
@@ -238,11 +194,388 @@ Company: {company}
 Job description:
 {jd_text}
 
-Candidate profile (use ONLY this information):
-{profile_text}
+{RESUME_FORMAT_SPEC}
 
-CRITICAL: Use only information from the profile above. Do not add any experience, skill, project, education, or certification not stated there. Include at least 4 projects (mandatory), ordered from least relevant to most relevant for the role. Prioritize production engineering work over basic development tasks. Use ## for main sections and ### for company/project names so the PDF has clear heading hierarchy (h2/h3). Always include LANGUAGES. Use keywords from the JD for ATS. Output only valid Markdown for the resume, no commentary. Use bold headings with separators exactly like a professional resume."""
-    return prompt
+Saved profile:
+{profile_text}
+"""
+
+
+def choose_headline(profile: dict, role: str) -> str:
+    """Keep the saved headline unless the target role is a narrower title already supported by the skills."""
+    identity = profile.get("identity") or {}
+    saved = (identity.get("headline") or "").strip() or "AI Full Stack Developer"
+    blob = " ".join(
+        f"{group.get('group', '')} {group.get('items', '')}" for group in (profile.get("skills") or [])
+    ).lower()
+    blob = f"{blob} {saved.lower()}"
+    role_text = re.sub(
+        r"\b(senior|sr\.?|lead|staff|principal|manager|director|head|intern)\b",
+        " ",
+        (role or "").lower(),
+    )
+    role_text = re.sub(r"[^a-z0-9+\s]", " ", role_text)
+    role_text = re.sub(r"\s+", " ", role_text)
+    checks = (
+        (("react",), "React Developer", ("react",)),
+        (("front end", "frontend", "front-end", "ui developer"), "Frontend Developer", ("react", "javascript")),
+        (("back end", "backend", "back-end"), "Backend Developer", ("node", "php", "fastapi", "express", "python")),
+        (("devops", "sre", "site reliability"), "DevOps Engineer", ("docker", "kubernetes", "github actions")),
+        (("platform", "kubernetes", "k8s"), "Platform Engineer", ("kubernetes", "docker")),
+        (("integration",), "Integration Engineer", ("api", "rest")),
+        (("generative", "gen ai", "genai", "llm"), "AI Full Stack Developer", ("rag", "langchain", "fastapi", "ollama")),
+        (("full stack", "fullstack", "full-stack"), saved, ("react",)),
+    )
+    for needles, headline, required in checks:
+        if any(needle in role_text for needle in needles) and any(token in blob for token in required):
+            return headline
+    return saved
+
+
+def assemble_resume_markdown(model_md: str, profile: dict, region: str) -> str:
+    """Rebuild the resume so names, dates, skills, and closing sections stay on the saved facts."""
+    sections = _split_markdown_sections(_strip_fences(model_md or ""))
+    region_name = "UAE" if str(region).upper() == "UAE" else "INR"
+    summary = _format_summary(sections.get("summary", ""), _saved_summary(profile, region_name))
+    skills = _format_skills(sections.get("skills", ""), profile)
+    experience = _format_experience(profile, sections.get("experience", ""), region_name)
+    projects = _format_projects(profile, sections.get("projects", ""), _extract_bullets(experience))
+    parts = [
+        "## Professional Summary",
+        "",
+        summary,
+        "",
+        "## Skills",
+        "",
+        skills,
+        "",
+        "## Work Experience",
+        "",
+        experience,
+        "",
+        "## Projects",
+        "",
+        projects,
+        "",
+        _format_fixed_sections(profile),
+    ]
+    return "\n".join(part for part in parts if part is not None).strip() + "\n"
+
+
+def _saved_summary(profile: dict, region: str) -> str:
+    summaries = profile.get("summaries") or {}
+    key = "uae" if region == "UAE" else "inr"
+    text = (summaries.get(key) or "").strip()
+    if text:
+        return text
+    other = "inr" if key == "uae" else "uae"
+    return (summaries.get(other) or "").strip()
+
+
+def _strip_fences(md: str) -> str:
+    text = md.strip()
+    text = re.sub(r"^```(?:markdown|md)?\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*```$", "", text)
+    return text.strip()
+
+
+def _split_markdown_sections(md: str) -> dict[str, str]:
+    sections: dict[str, list[str]] = {}
+    current = "preamble"
+    for line in md.splitlines():
+        match = re.match(r"^##\s+(.+?)\s*$", line.strip())
+        if match:
+            current = _section_name(match.group(1))
+            sections.setdefault(current, [])
+            continue
+        sections.setdefault(current, []).append(line)
+    return {key: "\n".join(lines).strip() for key, lines in sections.items()}
+
+
+def _section_name(heading: str) -> str:
+    cleaned = re.sub(r"[^a-z\s]", "", heading.lower()).strip()
+    if "summary" in cleaned:
+        return "summary"
+    if "skill" in cleaned:
+        return "skills"
+    if "experience" in cleaned or cleaned == "work":
+        return "experience"
+    if "project" in cleaned:
+        return "projects"
+    if "education" in cleaned:
+        return "education"
+    if "certification" in cleaned:
+        return "certifications"
+    if "award" in cleaned:
+        return "awards"
+    if "language" in cleaned:
+        return "languages"
+    return cleaned or "other"
+
+
+def _format_summary(model_section: str, saved: str) -> str:
+    sentences: list[str] = []
+    for line in (model_section or "").splitlines():
+        text = re.sub(r"[*_`]", "", line.strip())
+        if not text or text.startswith("#") or text[:1] in "-*•":
+            continue
+        sentences.extend(part.strip() for part in re.split(r"(?<=[.!?])\s+", text) if part.strip())
+    summary = " ".join(sentences[:3]).strip()
+    banned = ("passionate", "leveraged", "spearheaded", "responsible for", "results-driven", "dynamic professional")
+    if not summary or len(summary) > 700 or any(word in summary.lower() for word in banned):
+        return saved
+    return summary
+
+
+def _format_skills(model_section: str, profile: dict) -> str:
+    groups = profile.get("skills") or []
+    ordered: list[str] = []
+    seen: set[int] = set()
+    for line in (model_section or "").splitlines():
+        parsed = _skill_line(line)
+        if not parsed:
+            continue
+        label, items = parsed
+        index = _match_group(label, groups, seen)
+        if index is None:
+            continue
+        kept = _filter_skill_items(items, groups[index].get("items") or "")
+        if not kept:
+            continue
+        seen.add(index)
+        ordered.append(f"**{groups[index].get('group', label)}:** {', '.join(kept)}")
+    if not ordered:
+        ordered = [
+            f"**{group.get('group', '')}:** {group.get('items', '')}"
+            for group in groups
+            if (group.get("items") or "").strip()
+        ]
+        return "\n\n".join(ordered)
+    for index, group in enumerate(groups):
+        if index in seen or not (group.get("items") or "").strip():
+            continue
+        ordered.append(f"**{group.get('group', '')}:** {group.get('items', '')}")
+    return "\n\n".join(ordered)
+
+
+def _skill_line(line: str) -> tuple[str, str] | None:
+    text = line.strip()
+    if not text or text.startswith("#"):
+        return None
+    match = re.match(r"^\**\s*(.+?)\s*\**\s*:\s*(.+)$", text)
+    if not match:
+        return None
+    return match.group(1).strip("* ").strip(), match.group(2).strip()
+
+
+def _match_group(label: str, groups: list[dict], seen: set[int]) -> int | None:
+    wanted = _norm_name(label)
+    for index, group in enumerate(groups):
+        if index in seen:
+            continue
+        name = _norm_name(group.get("group") or "")
+        if name and (name == wanted or name in wanted or wanted in name):
+            return index
+    return None
+
+
+def _filter_skill_items(model_items: str, original_items: str) -> list[str]:
+    originals = [part.strip() for part in original_items.split(",") if part.strip()]
+    kept: list[str] = []
+    used: set[int] = set()
+    for piece in model_items.split(","):
+        match = _match_skill_item(piece.strip(), originals, used)
+        if match is None:
+            continue
+        used.add(match)
+        kept.append(originals[match])
+    return kept
+
+
+def _match_skill_item(piece: str, originals: list[str], used: set[int]) -> int | None:
+    if not piece:
+        return None
+    piece_l = piece.lower()
+    for index, original in enumerate(originals):
+        if index not in used and original.lower() == piece_l:
+            return index
+    for index, original in enumerate(originals):
+        if index in used:
+            continue
+        original_l = original.lower()
+        if piece_l in original_l:
+            return index
+        if len(original_l) >= 4 and original_l in piece_l and len(piece_l) <= len(original_l) + 8:
+            return index
+    return None
+
+
+def _format_experience(profile: dict, model_section: str, region: str) -> str:
+    blocks = _split_h3(model_section)
+    chunks: list[str] = []
+    for entry in profile.get("experience") or []:
+        saved = entry.get("bullets") or []
+        cap = len(saved) if len(saved) <= 2 else min(5, len(saved))
+        matched = ""
+        company = (entry.get("company") or "").strip().lower()
+        for title, body in blocks:
+            if company and company in title.lower():
+                matched = body
+                break
+        bullets = _keep_factual_bullets(_extract_bullets(matched), saved, cap)
+        lines = [f"### {entry.get('title', '').strip()}, {entry.get('company', '').strip()} | {entry.get('dates', '').strip()}"]
+        if region == "INR" and (entry.get("location") or "").strip():
+            lines.extend(["", entry["location"].strip()])
+        lines.append("")
+        lines.extend(f"- {bullet}" for bullet in bullets)
+        chunks.append("\n".join(lines))
+    return "\n\n".join(chunks)
+
+
+def _format_projects(profile: dict, model_section: str, experience_bullets: list[str]) -> str:
+    projects = profile.get("projects") or []
+    by_name = {_norm_name(project.get("name") or ""): project for project in projects if project.get("name")}
+    chosen: list[tuple[dict, str]] = []
+    used: set[str] = set()
+    for title, body in _split_h3(model_section):
+        key = _match_project(title, by_name)
+        if not key or key in used:
+            continue
+        used.add(key)
+        chosen.append((by_name[key], body))
+        if len(chosen) >= 5:
+            break
+    if not chosen:
+        chosen = [(project, "") for project in projects[:4]]
+    chunks: list[str] = []
+    for project, body in chosen:
+        saved = project.get("bullets") or []
+        cap = min(4, len(saved))
+        bullets = _keep_factual_bullets(_extract_bullets(body), saved, cap)
+        bullets = [bullet for bullet in bullets if not _too_similar(bullet, experience_bullets)]
+        if not bullets:
+            bullets = [bullet for bullet in saved if not _too_similar(bullet, experience_bullets)][:cap]
+        if not bullets:
+            continue
+        lines = [f"### {project.get('name', '').strip()}"]
+        tech = (project.get("tech") or "").strip()
+        if tech:
+            lines.append(f"*{tech}*")
+        lines.append("")
+        lines.extend(f"- {bullet}" for bullet in bullets[:cap or len(bullets)])
+        chunks.append("\n".join(lines))
+    return "\n\n".join(chunks)
+
+
+def _format_fixed_sections(profile: dict) -> str:
+    chunks: list[str] = ["## Education", ""]
+    for entry in profile.get("education") or []:
+        dates = f" | {entry['dates'].strip()}" if (entry.get("dates") or "").strip() else ""
+        chunks.append(f"### {entry.get('degree', '').strip()}{dates}")
+        if (entry.get("school") or "").strip():
+            chunks.extend(["", entry["school"].strip()])
+        chunks.append("")
+    if profile.get("certifications"):
+        chunks.extend(["## Certifications", ""])
+        chunks.extend(f"- {item}" for item in profile["certifications"])
+        chunks.append("")
+    if profile.get("awards"):
+        chunks.extend(["## Awards", ""])
+        chunks.extend(f"- {item}" for item in profile["awards"])
+        chunks.append("")
+    languages = (profile.get("identity") or {}).get("languages") or []
+    if languages:
+        chunks.extend(["## Languages", "", ", ".join(languages)])
+    return "\n".join(chunks).strip()
+
+
+def _split_h3(text: str) -> list[tuple[str, str]]:
+    parts = re.split(r"(?m)^###\s+", text or "")
+    blocks: list[tuple[str, str]] = []
+    for part in parts:
+        if not part.strip():
+            continue
+        lines = part.splitlines()
+        blocks.append((lines[0].strip(), "\n".join(lines[1:])))
+    return blocks
+
+
+def _extract_bullets(text: str) -> list[str]:
+    bullets: list[str] = []
+    for line in (text or "").splitlines():
+        match = re.match(r"^(?:[-*•]|\d+\.)\s+(.*)$", line.strip())
+        if match and match.group(1).strip():
+            bullets.append(match.group(1).strip())
+    return bullets
+
+
+def _keep_factual_bullets(model_bullets: list[str], saved: list[str], cap: int) -> list[str]:
+    if cap <= 0:
+        return []
+    allowed = set(re.findall(r"\d[\d,]*", " ".join(saved)))
+    kept: list[str] = []
+    used: set[int] = set()
+    for bullet in model_bullets:
+        match = _closest_saved(bullet, saved, used)
+        if match is None:
+            continue
+        numbers = set(re.findall(r"\d[\d,]*", bullet))
+        text = saved[match] if numbers - allowed else bullet.strip()
+        used.add(match)
+        kept.append(text)
+        if len(kept) >= cap:
+            break
+    if kept:
+        return kept
+    return saved[:cap]
+
+
+def _closest_saved(bullet: str, saved: list[str], used: set[int]) -> int | None:
+    left = _norm_name(bullet)
+    best_index = None
+    best_score = 0.55
+    for index, original in enumerate(saved):
+        if index in used:
+            continue
+        right = _norm_name(original)
+        if not left or not right:
+            continue
+        score = SequenceMatcher(None, left, right).ratio()
+        if left in right or right in left:
+            score = max(score, 0.9)
+        if score > best_score:
+            best_index = index
+            best_score = score
+    return best_index
+
+
+def _match_project(title: str, projects: dict[str, dict]) -> str | None:
+    wanted = _norm_name(title)
+    if wanted in projects:
+        return wanted
+    for key in projects:
+        if key and (key in wanted or wanted in key):
+            return key
+    return None
+
+
+def _norm_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).strip()
+
+
+def _too_similar(bullet: str, others: list[str]) -> bool:
+    left = _norm_name(bullet)
+    if not left:
+        return False
+    for other in others:
+        right = _norm_name(other)
+        if not right:
+            continue
+        if left in right or right in left:
+            return True
+        if SequenceMatcher(None, left, right).ratio() >= 0.82:
+            return True
+    return False
 
 
 def extract_contact_from_profile(profile_text: str) -> dict:
@@ -402,13 +735,79 @@ def _strip_header_from_md(md: str) -> str:
 
 
 def _build_header_html(profile_text: str, role: str) -> str:
-    """Build a fixed HTML header (name, role, contact + social links) so it always appears in the PDF."""
+    """Fallback header when only a text profile is available."""
     name = _extract_name_from_profile(profile_text) or "CANDIDATE"
-    role_escaped = role.upper() if role else ""
+    headline = role.strip() if role else ""
     contact = extract_contact_from_profile(profile_text)
     contact_html = _build_contact_line_html(contact)
     import html as html_mod
-    return f'<div class="resume-header"><h1>{html_mod.escape(name)}</h1><p class="resume-role">{html_mod.escape(role_escaped)}</p><p class="resume-contact">{contact_html}</p></div>'
+    return f'<div class="resume-header"><h1>{html_mod.escape(name)}</h1><p class="resume-role">{html_mod.escape(headline)}</p><p class="resume-contact">{contact_html}</p></div>'
+
+
+def build_region_header(profile: dict, role: str, region: str) -> str:
+    """Name, saved headline, and the contact line for India or UAE."""
+    import html as html_mod
+
+    identity = profile.get("identity") or {}
+    name = html_mod.escape((identity.get("name") or "Candidate").upper())
+    headline = html_mod.escape(choose_headline(profile, role))
+    contact = _region_contact_html(identity, region)
+    links = _region_links_html(identity.get("links") or {})
+    return (
+        '<div class="resume-header">'
+        f"<h1>{name}</h1>"
+        f'<p class="resume-role">{headline}</p>'
+        f'<p class="resume-contact">{contact}</p>'
+        f'<p class="resume-links">{links}</p>'
+        "</div>"
+    )
+
+
+def _tel_link(number: str) -> str:
+    import html as html_mod
+
+    tel = re.sub(r"[^\d+]", "", number)
+    return f'<a href="tel:{html_mod.escape(tel)}">{html_mod.escape(number)}</a>'
+
+
+def _region_contact_html(identity: dict, region: str) -> str:
+    import html as html_mod
+
+    phones = identity.get("phones") or {}
+    location = identity.get("location") or {}
+    parts: list[str] = []
+    email = (identity.get("email") or "").strip()
+    if email:
+        parts.append(f'<a href="mailto:{html_mod.escape(email)}">{html_mod.escape(email)}</a>')
+    india = (phones.get("india") or "").strip()
+    uae = (phones.get("uae") or "").strip()
+    if str(region).upper() == "UAE":
+        if india:
+            parts.append(f"INR: {_tel_link(india)}")
+        if uae:
+            parts.append(f"UAE: {_tel_link(uae)}")
+    else:
+        if india:
+            parts.append(_tel_link(india))
+        elif uae:
+            parts.append(_tel_link(uae))
+        city = (location.get("inr") or "").strip()
+        if city:
+            parts.append(html_mod.escape(city))
+    return " | ".join(parts)
+
+
+def _region_links_html(links: dict) -> str:
+    import html as html_mod
+
+    parts: list[str] = []
+    for key in ("linkedin", "github", "portfolio"):
+        url = (links.get(key) or "").strip()
+        if not url:
+            continue
+        label = re.sub(r"^https?://", "", url).strip("/")
+        parts.append(f'<a href="{html_mod.escape(url)}">{html_mod.escape(label)}</a>')
+    return " | ".join(parts)
 
 
 def generate_markdown(prompt: str, config: dict) -> str | None:
@@ -423,15 +822,25 @@ def generate_markdown(prompt: str, config: dict) -> str | None:
         return None
 
 
-def markdown_to_html(md: str, profile_text: str | None = None, role: str | None = None) -> str:
+def markdown_to_html(
+    md: str,
+    profile_text: str | None = None,
+    role: str | None = None,
+    profile: dict | None = None,
+    region: str | None = None,
+) -> str:
     try:
         import markdown
-        if profile_text and role:
+
+        header_html = ""
+        body_md = md
+        if profile and role:
+            header_html = build_region_header(profile, role, region or "INR")
+            body_md = _strip_header_from_md(md)
+        elif profile_text and role:
             header_html = _build_header_html(profile_text, role)
             body_md = _strip_header_from_md(md)
-            body = header_html + markdown.markdown(body_md, extensions=["extra", "nl2br"])
-        else:
-            body = markdown.markdown(md, extensions=["extra", "nl2br"])
+        body = header_html + markdown.markdown(body_md, extensions=["extra", "nl2br"])
     except ImportError:
         import html as html_mod
         body = f"<pre>{html_mod.escape(md)}</pre>"
@@ -445,138 +854,93 @@ def markdown_to_html(md: str, profile_text: str | None = None, role: str | None 
 <style>
 
 @page {{
-    margin: 28px;
+    size: A4;
+    margin: 14mm 13mm;
 }}
 
 body {{
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-    line-height: 1.45;
-    color: #111;
-    font-size: 11.2pt;
+    font-family: Arial, Helvetica, sans-serif;
+    line-height: 1.35;
+    color: #1a1a1a;
+    font-size: 10.5pt;
 }}
 
 .resume-header {{
     display: block;
-    margin-bottom: 16px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid #ddd;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1.5px solid #1a1a1a;
 }}
 
 .resume-header h1 {{
-    font-size: 22pt;
+    font-size: 18pt;
     margin: 0;
-    letter-spacing: 1px;
+    letter-spacing: 0.6px;
+    font-weight: 700;
 }}
 
 .resume-role {{
-    font-size: 12pt;
-    margin: 4px 0 6px 0;
-    color: #333;
+    font-size: 11pt;
+    margin: 2px 0 4px 0;
+    color: #222;
 }}
 
-.resume-contact {{
-    font-size: 10pt;
+.resume-contact,
+.resume-links {{
+    font-size: 9.5pt;
     margin: 0;
+    line-height: 1.4;
 }}
 
-.resume-contact a {{
+.resume-contact a,
+.resume-links a {{
     color: #0a66c2;
     text-decoration: none;
 }}
 
-h1 {{
-    font-size: 22pt;
-    margin: 0;
-    letter-spacing: 1px;
-}}
-
 h2 {{
-    font-size: 12pt;
-    margin-top: 18px;
-    margin-bottom: 6px;
-    border-bottom: 1px solid #ddd;
-    padding-bottom: 4px;
-    letter-spacing: .5px;
+    font-size: 11pt;
+    margin-top: 11px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid #222;
+    padding-bottom: 2px;
+    font-weight: 700;
 }}
 
 h3 {{
-    font-size: 11pt;
-    font-weight: 600;
-    margin-top: 12px;
-    margin-bottom: 4px;
+    font-size: 10.5pt;
+    font-weight: 700;
+    margin-top: 8px;
+    margin-bottom: 1px;
     color: #1a1a1a;
 }}
 
-h4 {{
-    font-size: 10.5pt;
-    font-weight: 600;
-    margin-top: 10px;
-    margin-bottom: 2px;
-    color: #333;
-}}
-
-h5 {{
-    font-size: 10pt;
-    font-weight: 600;
-    margin-top: 8px;
-    margin-bottom: 2px;
-    color: #444;
-}}
-
 p {{
-    margin: 6px 0;
+    margin: 2px 0 4px 0;
+}}
+
+em {{
+    font-style: italic;
+    color: #333;
+    font-size: 9.5pt;
 }}
 
 ul {{
-    margin: 6px 0 12px 0;
-    padding-left: 18px;
+    margin: 2px 0 6px 0;
+    padding-left: 16px;
 }}
 
 li {{
-    margin-bottom: 6px;
-    padding-left: 2px;
-}}
-
-li::marker {{
-    color: #0a66c2;
-    font-size: 10pt;
+    margin-bottom: 2px;
 }}
 
 strong {{
-    font-weight: 600;
+    font-weight: 700;
 }}
 
 a {{
     color: #0a66c2;
     text-decoration: none;
-}}
-
-a:hover {{
-    text-decoration: underline;
-}}
-
-hr {{
-    border: none;
-    border-top: 1px solid #ddd;
-    margin: 10px 0;
-}}
-
-.header {{
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 8px;
-}}
-
-.contact {{
-    font-size: 10pt;
-    text-align: right;
-}}
-
-.role {{
-    font-size: 12pt;
-    margin-top: 2px;
-    color: #333;
 }}
 
 </style>
@@ -616,7 +980,7 @@ def get_resume_path(
         return None
     company_slug = slugify(company)
     role_slug = slugify(role)
-    path = Path(base) / reg / "generated" / f"{company_slug}-{role_slug}.pdf"
+    path = region_resume_dir(base, reg) / "generated" / f"{company_slug}-{role_slug}.pdf"
     if path.is_file():
         return str(path)
     return None
@@ -646,9 +1010,16 @@ def main() -> None:
     config = get_config()
     region = infer_region(args.excel_path, args.region)
 
-    profile_text = load_profile(config["profile_file"])
+    from backend.services.profile_service import load_profile_document, profile_has_content, render_resume_source
+
+    profile = load_profile_document()
+    if profile_has_content(profile):
+        profile_text = render_resume_source(profile, region)
+    else:
+        profile = None
+        profile_text = load_profile(config["profile_file"])
     if not profile_text:
-        logger.error("Profile file not found or empty. Set PROFILE_FILE in .env or create profile.txt.")
+        logger.error("Profile is empty. Add your details on the Profile page or in profile.txt.")
         sys.exit(1)
 
     df = load_excel(args.excel_path, logger)
@@ -656,7 +1027,7 @@ def main() -> None:
     total = len(rows)
     logger.info("Loaded %d rows from %s (region=%s).", total, args.excel_path, region)
 
-    out_dir = Path(config["resumes_base"]) / region / "generated"
+    out_dir = region_resume_dir(config["resumes_base"], region) / "generated"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     generated = 0
@@ -664,11 +1035,21 @@ def main() -> None:
     failed = 0
     sent = 0
     skipped_no_email = 0
+    skipped_cold = 0
     ollama_state: dict = {}
 
     for i, row in enumerate(rows):
         company = str(row.get("Company", "")).strip()
         role = str(row.get("Role", "")).strip()
+        if is_cold_email(role):
+            logger.info(
+                "[%d/%d] %s has no role. Cold mail uses the AI Full Stack resume from Send, so no tailored resume is generated.",
+                i + 1,
+                total,
+                company or "This row",
+            )
+            skipped_cold += 1
+            continue
         jd = row.get("Job Description")
         if pd.isna(jd):
             jd_text = None
@@ -696,11 +1077,14 @@ def main() -> None:
             logger.warning("[%d/%d] Ollama failed for %s / %s.", i + 1, total, company, role)
             continue
 
-        md = ensure_contact_links(md, profile_text)
+        if profile:
+            md = assemble_resume_markdown(md, profile, region)
+        else:
+            md = ensure_contact_links(md, profile_text)
 
         md_path = out_dir / f"{base_name}.md"
         md_path.write_text(md, encoding="utf-8")
-        if html_to_pdf(markdown_to_html(md, profile_text, role), pdf_path):
+        if html_to_pdf(markdown_to_html(md, profile_text, role, profile=profile, region=region), pdf_path):
             generated += 1
             logger.info("[%d/%d] Saved PDF: %s", i + 1, total, pdf_path)
         else:
@@ -728,8 +1112,8 @@ def main() -> None:
                 time.sleep(10)
 
     logger.info(
-        "Done. Generated: %d, sent: %d, skipped (exists): %d, skipped (no email): %d, failed: %d.",
-        generated, sent, skipped_exists, skipped_no_email, failed,
+        "Done. Generated: %d, sent: %d, skipped (exists): %d, skipped (cold, no role): %d, skipped (no email): %d, failed: %d.",
+        generated, sent, skipped_exists, skipped_cold, skipped_no_email, failed,
     )
 
 

@@ -31,8 +31,9 @@ from email_sends_db import (
     is_logging_enabled,
     log_email_send,
 )
+from cold_email import cold_prompt, cold_subject, ensure_role_column, is_cold_email
 from fallback_email_body import build_fallback_application_body
-from resume_selection import get_resume_path
+from resume_selection import get_resume_path, region_resume_dir
 
 
 # --- .env loading (no external lib) ---
@@ -155,11 +156,11 @@ def load_excel(excel_path: str, logger: logging.Logger) -> pd.DataFrame:
     if not os.path.isfile(excel_path):
         sys.exit(f"Excel file not found: {excel_path}")
     df = pd.read_excel(excel_path, engine="openpyxl")
-    df = normalize_columns(df)
-    required = {"Company", "Role", "Email"}
+    df = ensure_role_column(normalize_columns(df))
+    required = {"Company", "Email"}
     missing = required - set(df.columns)
     if missing:
-        sys.exit(f"Excel missing columns (after mapping): {missing}. Expected company name, role, HR email.")
+        sys.exit(f"Excel missing columns (after mapping): {missing}. Expected company name and HR email. Role is optional.")
     before = len(df)
     df = df.dropna(subset=["Email"])
     df = df[df["Email"].astype(str).str.contains("@", na=False)]
@@ -178,20 +179,25 @@ def _normalize_cell(val) -> str:
 
 
 def get_subject(company: str, role: str) -> str:
-    """Return email subject from company and role (cold email / anonymous company handled)."""
-    has_role = _normalize_cell(role)
+    """Application subject when a role is present. Cold subject when it is not."""
     has_company = _normalize_cell(company)
-    if not has_role and not has_company:
-        return "Reaching out"
-    if not has_role:
-        return f"Reaching out – {company}"
+    if is_cold_email(role):
+        return cold_subject(has_company)
     if not has_company:
         return f"Application for {role}"
     return f"Application for {role} at {company}"
 
 
 def load_profile(config: dict, logger: logging.Logger) -> str | None:
-    """Load candidate profile from TXT file (email, name, phone, work exp, projects). Returns None if missing."""
+    """Load candidate facts from the saved profile, then profile.txt. Email rules stay with the email text."""
+    try:
+        from backend.services.profile_service import email_profile_or_none
+
+        rendered = email_profile_or_none()
+        if rendered:
+            return rendered
+    except Exception as exc:
+        logger.warning("Structured profile unavailable, using profile.txt: %s", exc)
     path = Path(config["profile_file"])
     if not path.is_file():
         logger.debug("No profile file at %s; emails will not include your personal info.", path)
@@ -333,9 +339,26 @@ def generate_body(
     url = f"{config['ollama_base_url']}/api/generate"
     role_clean = _normalize_cell(role)
     company_clean = _normalize_cell(company)
-    is_cold_email = not role_clean
+    cold = is_cold_email(role_clean)
     is_anonymous_company = not company_clean
     has_jd = bool((job_description or "").strip())
+    if cold:
+        logger.info("Cold email for %s (no role). Writing as an AI Full Stack Developer.", company_clean or "unnamed company")
+        prompt = cold_prompt(company_clean, profile_text)
+        if name:
+            prompt += f"\n- You may mention that you were referred by {name} if it fits naturally."
+        url = f"{config['ollama_base_url']}/api/generate"
+        payload = {"model": config["ollama_model"], "prompt": prompt, "stream": False}
+        try:
+            resp = requests.post(url, json=payload, timeout=120)
+            resp.raise_for_status()
+            data = resp.json()
+            body = (data.get("response") or "").strip()[:BODY_MAX_CHARS]
+            if body:
+                return body
+        except requests.RequestException as e:
+            logger.warning("Ollama request failed (%s); using template email body.", e)
+        return build_fallback_application_body(company, role, name, max_chars=BODY_MAX_CHARS)
 
     # Email structure: greeting → about me + role (if any) → achievements/exp → how I add value. Signature is added automatically.
     structure = """Follow this structure in order:
@@ -353,12 +376,7 @@ Do not write "Subject:", "Email subject:", or any email header line—the subjec
         prompt = f"""Write a short, professional job application email body.
 - Addressed to the hiring team at {company_clean}.
 {structure}"""
-    if is_cold_email:
-        prompt += """
-- This is a cold email (no specific role in the listing). Write as a developer with 2+ years of experience looking for an opportunity in development roles. Do not mention a specific job title. Never use the word "nan" or any placeholder for a role.
-- Professional tone, not robotic. Do not write "Subject:" or any email header; start with the greeting. Keep it concise."""
-    else:
-        prompt += f"""
+    prompt += f"""
 - Mention the company name and the role "{role_clean}" naturally.
 - Professional tone, not robotic. Do not write "Subject:" or any email header; start with the greeting. Keep it concise."""
     if name:
@@ -377,13 +395,9 @@ CRITICAL: Write the email based only on what in the candidate profile actually m
 
     if profile_text:
         role_instruction = (
-            "This is a cold email so highlight 1–2 broadly relevant experiences or projects (full-stack, frontend, or general dev)."
-            if is_cold_email and not has_jd
-            else (
-                f'Use the job description above: mention only 1–2 items from the candidate profile that actually match the JD. Do not list everything; do not claim non-matching skills.'
-                if has_jd
-                else f'Based on the role "{role_clean}", choose what to include: only 1–2 items that match (e.g. one relevant work experience OR one relevant project; for frontend highlight frontend work, for full-stack highlight full-stack, etc.). Do not list everything.'
-            )
+            f'Use the job description above: mention only 1–2 items from the candidate profile that actually match the JD. Do not list everything; do not claim non-matching skills.'
+            if has_jd
+            else f'Based on the role "{role_clean}", choose what to include: only 1–2 items that match (e.g. one relevant work experience OR one relevant project; for frontend highlight frontend work, for full-stack highlight full-stack, etc.). Do not list everything.'
         )
         prompt += f"""
 
@@ -469,8 +483,7 @@ def main() -> None:
         args.dry_run,
         config["ollama_base_url"],
     )
-    resumes_base = Path(config["resumes_base"])
-    region_dir = resumes_base / region
+    region_dir = region_resume_dir(config["resumes_base"], region)
     if not region_dir.is_dir():
         sys.exit(f"Resumes region directory not found: {region_dir}")
 
