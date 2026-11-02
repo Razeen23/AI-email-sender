@@ -7,6 +7,9 @@ import type {
   ProfileDocument,
   ResumeRegion,
   SendsPage,
+  SingleDraft,
+  SingleSendResult,
+  SingleSuggestion,
   Stats,
 } from "./types";
 
@@ -77,6 +80,46 @@ export const api = {
     source_paths?: string[];
   }) =>
     request<GeneratedResume>("/api/resumes/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  suggestSingle: (payload: {
+    email?: string;
+    role?: string;
+    skills?: string;
+    job_description?: string;
+    region: string;
+  }) =>
+    request<SingleSuggestion>("/api/single/suggest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  draftSingle: (payload: {
+    email?: string;
+    role?: string;
+    skills?: string;
+    job_description?: string;
+    region: string;
+  }) =>
+    request<SingleDraft>("/api/single/draft", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  sendSingle: (payload: {
+    email: string;
+    role?: string;
+    skills?: string;
+    job_description?: string;
+    region: string;
+    resume_path: string;
+    subject: string;
+    body: string;
+    dry_run: boolean;
+  }) =>
+    request<SingleSendResult>("/api/single/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),

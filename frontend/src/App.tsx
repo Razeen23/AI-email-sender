@@ -5,6 +5,7 @@ import History from "./pages/History";
 import Profile from "./pages/Profile";
 import Resumes from "./pages/Resumes";
 import Send from "./pages/Send";
+import Single from "./pages/Single";
 import Settings from "./pages/Settings";
 
 export default function App() {
@@ -13,6 +14,7 @@ export default function App() {
       <Route element={<Layout />}>
         <Route path="/" element={<Dashboard />} />
         <Route path="/send" element={<Send />} />
+        <Route path="/single" element={<Single />} />
         <Route path="/history" element={<History />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/resumes" element={<Resumes />} />

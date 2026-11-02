@@ -136,7 +136,10 @@ def setup_logging(dry_run: bool) -> logging.Logger:
 
 
 def _canon(s: str) -> str:
-    return re.sub(r"[\s_]+", " ", str(s).strip().lower())
+    text = str(s).strip().lower()
+    text = re.sub(r"[/|_+\-]+", " ", text)
+    text = re.sub(r"[^\w\s]", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -144,27 +147,32 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
     Required internal columns: Company, Email
     Optional: Role (missing or blank means a cold email), Job Description, Key Skills, Why Match
+
+    Close names count: "Company / Organisation", "Company Name", "Email Address", "HR Email".
     """
     col_map: dict[object, str] = {}
     for c in df.columns:
         key = _canon(c)
-        if "company" in key and "name" in key:
-            col_map[c] = "Company"
-        elif key == "company":
-            col_map[c] = "Company"
-        elif key == "role":
-            col_map[c] = "Role"
-        elif ("hr" in key and "email" in key) or key == "email":
-            col_map[c] = "Email"
-        elif "job description" in key or key in {"jd", "jobdesc", "job desc"}:
+        tokens = set(key.split())
+        compact = key.replace(" ", "")
+        if "job description" in key or key in {"jd", "jobdesc", "job desc"} or (
+            "job" in tokens and "description" in tokens
+        ):
             col_map[c] = "Job Description"
-        elif key in {"key skills", "skills", "keyskill", "keyskill(s)"} or ("key" in key and "skills" in key):
+        elif key in {"key skills", "skills", "keyskill", "keyskills"} or ("key" in tokens and "skills" in tokens):
             col_map[c] = "Key Skills"
-        elif key in {"why match", "match reason", "reason"} or ("why" in key and "match" in key):
+        elif key in {"why match", "match reason", "reason"} or ("why" in tokens and "match" in tokens):
             col_map[c] = "Why Match"
         elif "referal" in key or "referral" in key:
-            # not in the new schema, but keep compatibility
             col_map[c] = "Name"
+        elif "email" in compact or compact == "mail":
+            col_map[c] = "Email"
+        elif "company" in tokens or "employer" in tokens or tokens & {"organisation", "organization"}:
+            col_map[c] = "Company"
+        elif key in {"role", "position", "designation", "job title", "job role"} or (
+            "job" in tokens and "title" in tokens
+        ):
+            col_map[c] = "Role"
     return df.rename(columns=col_map)
 
 
@@ -455,9 +463,10 @@ def build_and_send(
     config: dict,
     dry_run: bool,
     logger: logging.Logger,
+    subject: str | None = None,
 ) -> tuple[bool, str | None]:
     msg = EmailMessage()
-    msg["Subject"] = get_subject(company, role)
+    msg["Subject"] = (subject or "").strip() or get_subject(company, role)
     msg["From"] = config["from_email"]
     msg["To"] = to_email
     msg.set_content(body)

@@ -100,22 +100,10 @@ def infer_region(excel_path: str, region_arg: str | None) -> str:
 
 
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Same column mapping as send_emails.py."""
-    col_map = {}
-    for c in df.columns:
-        key = str(c).strip().lower()
-        if "company" in key and "name" in key:
-            col_map[c] = "Company"
-        elif key == "role":
-            col_map[c] = "Role"
-        elif "hr" in key and "email" in key:
-            col_map[c] = "Email"
-        elif "referal" in key or "referral" in key:
-            col_map[c] = "Name"
-        elif ("job" in key and "description" in key) or key == "jd":
-            col_map[c] = "Job Description"
-    df = df.rename(columns=col_map)
-    return df
+    """Same header mapping as send_emails2.normalize_columns."""
+    from send_emails2 import normalize_columns as map_columns
+
+    return map_columns(df)
 
 
 def load_excel(excel_path: str, logger: logging.Logger) -> pd.DataFrame:

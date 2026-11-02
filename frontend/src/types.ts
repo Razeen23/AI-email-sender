@@ -136,6 +136,32 @@ export type ResumeRegion = {
   folders: ResumeFolder[];
 };
 
+export type SingleSuggestion = {
+  region: Region;
+  kind: "cold" | "application";
+  resume_path: string | null;
+  resume_filename: string | null;
+  already_applied: boolean;
+};
+
+export type SingleDraft = {
+  region: Region;
+  kind: "cold" | "application";
+  subject: string;
+  body: string;
+  already_applied: boolean;
+};
+
+export type SingleSendResult = {
+  ok: boolean;
+  dry_run: boolean;
+  email: string;
+  subject: string;
+  region: Region;
+  resume_path: string;
+  resume_filename: string;
+};
+
 export type GeneratedResume = {
   path: string;
   filename: string;

@@ -71,6 +71,21 @@ class SendJobRequest(BaseModel):
     resume_overrides: dict[int, str] = Field(default_factory=dict)
 
 
+class SingleEmailRequest(BaseModel):
+    email: str = ""
+    role: str = ""
+    skills: str = ""
+    job_description: str = ""
+    region: str
+
+
+class SingleSendRequest(SingleEmailRequest):
+    resume_path: str
+    subject: str
+    body: str
+    dry_run: bool = True
+
+
 class GenerateResumeRequest(BaseModel):
     company: str
     role: str

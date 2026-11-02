@@ -131,6 +131,65 @@ def role_to_resume_subdir(
     return REGION_FOLDERS.get(key, REGION_FOLDERS["INR"])
 
 
+def stem_from_listing(
+    role: str | None,
+    *,
+    job_description: str | None = None,
+    key_skills: str | None = None,
+) -> str:
+    """Pick a resume stem from role, skills, and job description.
+
+    Gen-AI wording in any of those fields wins. Otherwise the role is matched,
+    then the skills and job description. An empty listing uses the default resume.
+    """
+    if should_use_gen_ai_resume(role, job_description, key_skills):
+        return "Generative-AI-Engineer"
+    role_text = (role or "").strip()
+    if role_text and role_text.lower() != "nan":
+        for pattern, stem in ROLE_TO_STEM:
+            if pattern.search(role_text):
+                return stem
+    listing = " ".join(
+        part.strip()
+        for part in (key_skills or "", job_description or "")
+        if part and str(part).strip()
+    )
+    for pattern, stem in ROLE_TO_STEM:
+        if listing and pattern.search(listing):
+            return stem
+    return DEFAULT_STEM
+
+
+def suggest_resume_path(
+    resumes_base: str,
+    region: str,
+    role: str,
+    logger: logging.Logger,
+    *,
+    job_description: str | None = None,
+    key_skills: str | None = None,
+) -> str | None:
+    """Pick a stock PDF using role, skills, and job description together."""
+    dir_path = region_resume_dir(resumes_base, region)
+    stem = stem_from_listing(role, job_description=job_description, key_skills=key_skills)
+    chosen = _find_pdf_by_stem(dir_path, stem)
+    if chosen:
+        return str(chosen)
+
+    fallback = _find_pdf_by_stem(dir_path, DEFAULT_STEM)
+    if fallback:
+        logger.warning("No %s resume in %s. Falling back to %s", stem, dir_path, fallback.name)
+        return str(fallback)
+
+    pdfs = _iter_pdfs(dir_path)
+    if pdfs:
+        logger.warning("No matching resume in %s. Falling back to %s", dir_path, pdfs[0].name)
+        return str(pdfs[0])
+
+    logger.error("Resume directory empty or missing: %s", dir_path)
+    return None
+
+
 def get_resume_path(
     resumes_base: str,
     region: str,

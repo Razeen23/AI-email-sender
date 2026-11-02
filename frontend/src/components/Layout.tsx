@@ -6,6 +6,7 @@ import type { Health } from "../types";
 const links = [
   { to: "/", label: "Dashboard", hint: "Stats and resumes" },
   { to: "/send", label: "Send", hint: "Excel and campaigns" },
+  { to: "/single", label: "One email", hint: "Fill and send" },
   { to: "/history", label: "History", hint: "Every attempt" },
   { to: "/profile", label: "Profile", hint: "Details and experience" },
   { to: "/resumes", label: "Resumes", hint: "Browse and generate" },

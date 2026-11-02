@@ -6,7 +6,7 @@ import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.controllers import excel, health, jobs, profile, resumes, stats
+from backend.controllers import excel, health, jobs, profile, resumes, single, stats
 from backend.paths import PROJECT_ROOT, load_dotenv
 from email_sends_db import init_db, is_logging_enabled
 
@@ -30,6 +30,7 @@ app.include_router(excel.router, prefix="/api")
 app.include_router(jobs.router, prefix="/api")
 app.include_router(resumes.router, prefix="/api")
 app.include_router(profile.router, prefix="/api")
+app.include_router(single.router, prefix="/api")
 
 
 @app.on_event("startup")

@@ -133,3 +133,13 @@ The module `send_generated_resume_email.py` is used by `generate_resume.py` to s
 ### Using generated resumes in send_emails
 
 `send_emails.py` (CLI and Email preview API) prefers a company-specific generated PDF when it exists under `resumes/{region}/generated/{company-slug}-{role-slug}.pdf`, and otherwise uses the role-based folder (e.g. `full-stack-inr`). No extra configuration needed.
+
+
+t1
+cd /Users/razeen/Projects/AI-projects/email-sender
+source .venv/bin/activate
+uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+
+t2
+cd /Users/razeen/Projects/AI-projects/email-sender/frontend
+npm run dev
